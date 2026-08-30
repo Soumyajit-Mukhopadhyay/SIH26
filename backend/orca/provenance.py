@@ -104,10 +104,15 @@ STALENESS_HOURS: dict[str, float] = {
     "visibility": 3.0,
     "precipitation": 3.0,
     "lightning_probability": 3.0,
+    # CAPE and CIN — thunderstorm potential, the honest stand-in for a lightning
+    # feed India has no free authoritative source for.
+    "convective_energy": 3.0,
+    "convective_inhibition": 3.0,
     # ocean — daily to multi-day products
     "sst": 24.0,
     "sst_anomaly": 24.0,
     "sea_surface_current": 12.0,
+    "sea_surface_current_direction": 12.0,
     "sea_level_anomaly": 24.0,
     "mixed_layer_depth": 24.0,
     "chlorophyll": 72.0,  # cloud gaps make anything tighter dishonest

@@ -24,6 +24,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from orca.api.routes import forecast as forecast_routes
 from orca.api.routes import health as health_routes
 from orca.config import DbDriver, Settings, get_settings, mask_dsn
 from orca.obs.logging import configure_logging
@@ -149,6 +150,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        from orca.sources.base import close_client
+
+        await close_client()
         log.info("ORCA shutting down")
 
 
@@ -208,6 +212,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(health_routes.router)
+    app.include_router(forecast_routes.router)
 
     @app.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:
