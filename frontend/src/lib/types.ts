@@ -279,6 +279,18 @@ export interface PfzDerivation {
   front?: { detector: string; method: string; citation: string; front_cells: number };
 }
 
+export interface VectorEncoding {
+  u_channel: string;
+  v_channel: string;
+  magnitude_channel: string;
+  mask_channel: string;
+  zero_point: number;
+  max_abs: number;
+  scale: number;
+  formula: string;
+  note: string;
+}
+
 export interface RasterVariable {
   variable: string;
   unit: string | null;
@@ -297,6 +309,14 @@ export interface RasterVariable {
   timesteps: string[];
   /** Present on pfz_rank only. */
   pfz?: PfzDerivation;
+  /** 'vector' for the u/v flow fields; absent for colour-mapped scalars. */
+  kind?: 'vector';
+  encoding?: VectorEncoding;
+  direction_convention?: 'from' | 'to';
+  convention_note?: string;
+  particle_speed?: number;
+  label?: string;
+  description?: string;
 }
 
 export interface RasterCatalogue {

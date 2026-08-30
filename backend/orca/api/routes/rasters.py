@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from orca.config import get_settings
 from orca.jobs import ingest
 from orca.provenance import utcnow
-from orca.science import colormap
+from orca.science import colormap, vectorfield
 from orca.science.grid import AOI, H3_RESOLUTION
 
 log = logging.getLogger(__name__)
@@ -30,7 +30,12 @@ router = APIRouter(tags=["rasters"])
 
 #: Guard against a path-traversal via the variable segment. Only names we
 #: actually produce are servable.
-_ALLOWED = set(colormap.RAMPS) | {"pfz_rank"}
+#:
+#: Built from BOTH registries. Deriving it from the colour ramps alone silently
+#: 404'd the u/v flow fields, which are not colour-mapped — the layer rail listed
+#: them, the toggle worked, and the map stayed empty with only a bare 404 in the
+#: console to say why.
+_ALLOWED = set(colormap.RAMPS) | set(vectorfield.SPECS) | {"pfz_rank"}
 
 _refresh_state: dict[str, Any] = {"running": False, "last": None}
 
@@ -63,6 +68,24 @@ async def raster_catalogue() -> dict[str, Any]:
 
 @router.get("/rasters/legend/{variable}", summary="Legend stops, from the image's own ramp")
 async def raster_legend(variable: str) -> dict[str, Any]:
+    # A vector field has no colour ramp; its "legend" is the encoding, which is
+    # what makes the packed PNG interpretable at all.
+    spec = vectorfield.SPECS.get(variable)
+    if spec is not None:
+        return {
+            "variable": variable,
+            "kind": "vector",
+            "label": spec.label,
+            "unit": spec.unit,
+            "max_abs": spec.max_abs,
+            "direction_convention": spec.convention,
+            "particle_speed": spec.particle_speed,
+            "description": spec.description,
+            "note": (
+                "Particle paths are a rendering of the field, not a trajectory forecast. "
+                "SAR drift is a separate deterministic computation."
+            ),
+        }
     try:
         return colormap.legend(variable)
     except KeyError as exc:

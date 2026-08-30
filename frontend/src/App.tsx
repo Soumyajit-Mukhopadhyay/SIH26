@@ -12,7 +12,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BitmapLayer, GeoJsonLayer, PathLayer, PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
+import {
+  BitmapLayer,
+  GeoJsonLayer,
+  PathLayer,
+  PolygonLayer,
+  ScatterplotLayer,
+} from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
 import { Anchor, Crosshair, Loader2, MapPin, Ruler, Waves } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -38,6 +44,7 @@ import { LayerRail } from '@/components/LayerRail';
 import { BoundaryPanel } from '@/components/BoundaryPanel';
 import { useAgentStream } from '@/hooks/useAgentStream';
 import { useRasterImages } from '@/hooks/useRasterImages';
+import { useParticleFlow } from '@/hooks/useParticleFlow';
 
 /**
  * The AOI outline as a densified ring.
@@ -265,6 +272,34 @@ export default function App() {
   }, [rasters]);
   const rasterImages = useRasterImages([...activeLayers], rasterUrls, rasterEpoch);
 
+  // Flow particles. Only one vector field animates at a time: two overlapping
+  // particle systems are visually unreadable, and the wind and the current move
+  // at genuinely different speeds so a shared scale would misrepresent one.
+  const flowVariable = activeLayers.has('current_uv')
+    ? 'current_uv'
+    : activeLayers.has('wind_uv')
+      ? 'wind_uv'
+      : null;
+  const flowMeta = flowVariable
+    ? (rasters?.variables.find((v) => v.variable === flowVariable) ?? null)
+    : null;
+  const flowSpec = useMemo(
+    () =>
+      flowMeta?.bounds && flowMeta.encoding
+        ? {
+            bounds: flowMeta.bounds,
+            maxAbs: flowMeta.encoding.max_abs,
+            particleSpeed: flowMeta.particle_speed ?? 0.4,
+          }
+        : null,
+    [flowMeta],
+  );
+  const flowParticles = useParticleFlow(
+    flowVariable ? (rasterImages.images[flowVariable] ?? null) : null,
+    flowSpec,
+    { count: 9000, enabled: Boolean(flowVariable) },
+  );
+
   // ---- layers ----
   const layers = useMemo<Layer[]>(() => {
     const out: Layer[] = [];
@@ -291,6 +326,9 @@ export default function App() {
 
     // Data rasters, drawn beneath everything else so markers and boundaries stay
     // readable over them. Ordered so a derived layer sits above its source.
+    // Scalar (colour-mapped) rasters only. The u/v fields are drawn as particles
+    // below, not as a bitmap: an image of packed vector components is not a
+    // picture of anything.
     const ORDER = ['sst', 'chlorophyll', 'sst_gradient', 'pfz_rank'];
     for (const variable of ORDER) {
       if (!activeLayers.has(variable)) continue;
@@ -306,6 +344,38 @@ export default function App() {
           bounds: meta.bounds,
           opacity: layerOpacity,
           pickable: false,
+        }),
+      );
+    }
+
+    // Flow particles. Drawn as short trailing segments: the streak length reads
+    // as speed, and the taper gives direction without arrowheads.
+    if (flowVariable && flowParticles.length > 0 && flowSpec) {
+      const isCurrent = flowVariable === 'current_uv';
+      out.push(
+        // PathLayer with two-point paths rather than LineLayer. LineLayer was set
+        // up correctly here — visible, 585 instances, a live model, valid
+        // coordinates 0.3 degrees apart — and drew nothing at all, while
+        // PathLayer renders reliably in this same overlay (the AOI boundary uses
+        // it). Rounded caps also suit a flow streak better than butt ends.
+        new PathLayer<(typeof flowParticles)[number]>({
+          id: `flow-${flowVariable}`,
+          data: flowParticles,
+          getPath: (d) => [d.from, d.to],
+          getColor: (d) => {
+            // Opacity by speed: uniform brightness would make a calm basin look
+            // as energetic as a monsoon jet, which misrepresents the field.
+            const ratio = Math.min(d.speed / (flowSpec.maxAbs * 0.45), 1);
+            const alpha = 90 + ratio * 160;
+            return isCurrent ? [34, 211, 238, alpha] : [186, 214, 235, alpha];
+          },
+          getWidth: (d) => 1.0 + Math.min(d.speed / (flowSpec.maxAbs * 0.4), 1) * 1.6,
+          widthUnits: 'pixels',
+          widthMinPixels: 0.8,
+          capRounded: true,
+          jointRounded: true,
+          pickable: false,
+          updateTriggers: { getColor: flowVariable, getWidth: flowVariable },
         }),
       );
     }
@@ -464,6 +534,9 @@ export default function App() {
     fences,
     showFences,
     geofence,
+    flowVariable,
+    flowParticles,
+    flowSpec,
   ]);
 
   const activeClass = useMemo(

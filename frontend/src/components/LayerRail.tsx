@@ -23,6 +23,7 @@ import {
   RefreshCw,
   Thermometer,
   Waves,
+  Wind,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { RasterCatalogue, RasterVariable } from '@/lib/types';
@@ -35,6 +36,8 @@ const ICONS: Record<string, typeof Waves> = {
   chlorophyll: Fish,
   pfz_rank: Fish,
   wave_height: Waves,
+  wind_uv: Wind,
+  current_uv: Waves,
 };
 
 const TITLES: Record<string, string> = {
@@ -42,6 +45,8 @@ const TITLES: Record<string, string> = {
   sst_gradient: 'Thermal front strength',
   chlorophyll: 'Chlorophyll-a',
   pfz_rank: 'Potential fishing zones',
+  wind_uv: 'Wind flow',
+  current_uv: 'Surface current flow',
 };
 
 /** Age of a layer, from its valid_time. */
@@ -53,6 +58,26 @@ function ageHours(validTime: string | null | undefined): number | null {
 }
 
 function Legend({ variable }: { variable: RasterVariable }) {
+  // A vector field has no colour ramp. Showing the encoding is more useful than
+  // showing nothing, and it is what makes the PNG interpretable at all.
+  if (variable.kind === 'vector' && variable.encoding) {
+    return (
+      <div className="mt-1.5 space-y-1">
+        <div className="text-ink-2 data text-2xs">
+          ±{variable.encoding.max_abs} {variable.unit} encoded per channel
+        </div>
+        <div className="text-ink-3 text-2xs leading-snug">
+          Direction reported as the direction it{' '}
+          {variable.direction_convention === 'from' ? 'comes from' : 'flows to'}; the u/v here
+          are already resolved to eastward and northward motion.
+        </div>
+        <div className="text-ink-3 text-2xs leading-snug italic">
+          Particle paths are a rendering of the field, not a trajectory forecast.
+        </div>
+      </div>
+    );
+  }
+
   const cmap = variable.colormap;
   if (!cmap) return null;
 
@@ -163,7 +188,12 @@ export function LayerRail({
       {variables.length > 0 && (
         <>
           <div className="p-1.5">
-            {variables.map((variable) => {
+            {[...variables]
+              .sort((a, b) => {
+                const rank = (v: string) => (v.endsWith('_uv') ? 1 : 0);
+                return rank(a.variable) - rank(b.variable);
+              })
+              .map((variable) => {
               const on = active.has(variable.variable);
               const Icon = ICONS[variable.variable] ?? Layers;
               const age = ageHours(variable.valid_time);
@@ -282,6 +312,14 @@ export function LayerRail({
                 </div>
               );
             })}
+
+            {variables.some((v) => v.variable.endsWith('_uv')) && (
+              <p className="text-ink-3 px-2 pt-1 text-2xs leading-snug">
+                Only one flow field animates at a time — two overlapping particle systems are
+                unreadable, and wind and current move at different speeds so a shared scale
+                would misrepresent one of them.
+              </p>
+            )}
           </div>
 
           <div className="border-hairline border-t px-3 py-2">

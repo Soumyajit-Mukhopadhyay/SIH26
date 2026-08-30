@@ -17,6 +17,7 @@ provenance model exists to express.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 import time
@@ -250,6 +251,9 @@ async def run_ingest(
             keep_history=keep_history,
         )
 
+    # ---------------- vector fields for the particle layers ---------------
+    await _ingest_vector_fields(report, raster_dir, grid, keep_history)
+
     # ---------------- PFZ ------------------------------------------------
     lineage = [sst_dataset] + ([chl_dataset] if chl_dataset else [])
     try:
@@ -292,6 +296,67 @@ async def run_ingest(
         f"; failures: {report.failures}" if report.failures else "",
     )
     return report
+
+
+async def _ingest_vector_fields(
+    report: IngestReport, raster_dir: Path, grid: Grid, keep_history: int
+) -> None:
+    """Sample wind and current on a coarse lattice and write u/v rasters.
+
+    The two fields are spaced apart on purpose: Open-Meteo counts each location
+    in a multi-point request as a separate call against a 600-per-minute budget,
+    and running both back to back lost a batch to a 429 — which leaves a hole in
+    a flow field that looks like slack water rather than missing data.
+    """
+    from orca.science import vectorfield
+    from orca.sources.open_meteo import sample_lattice, sample_vectors
+
+    lats, lons = sample_lattice(grid, step_deg=2.0)
+
+    for index, kind in enumerate(("wind", "current")):
+        if index > 0:
+            # Space the fields apart to stay inside the per-minute call budget.
+            await asyncio.sleep(12.0)
+        variable = f"{kind}_uv"
+        try:
+            points = await sample_vectors(lats, lons, kind=kind)
+            if len(points) < len(lats) * 0.5:
+                report.failures[variable] = (
+                    f"only {len(points)} of {len(lats)} lattice points returned; "
+                    "the field would have large gaps"
+                )
+                continue
+
+            u, v = vectorfield.interpolate_to_grid(points, grid, max_distance_deg=2.2)
+            sidecar = vectorfield.write_vector_raster(
+                u,
+                v,
+                variable,
+                valid_time=utcnow(),
+                directory=raster_dir,
+                grid=grid,
+                provenance=Provenance.DERIVED,
+                lineage=["open_meteo.forecast" if kind == "wind" else "open_meteo.marine"],
+                dataset_id=f"open_meteo.{kind}",
+                provider="Open-Meteo",
+            )
+            report.variables_written.append(variable)
+            report.details[variable] = {
+                "bytes": sidecar["bytes"],
+                "samples": len(points),
+                "requested": len(lats),
+                "statistics": sidecar["statistics"],
+            }
+
+            if len(points) < len(lats):
+                report.notes.append(
+                    f"{variable}: {len(points)} of {len(lats)} lattice points returned, so the "
+                    "field is interpolated across some gaps."
+                )
+            _archive(raster_dir / variable, sidecar, keep_history)
+        except Exception as exc:
+            log.exception("failed to build the %s field", variable)
+            report.failures[variable] = f"{type(exc).__name__}: {exc}"
 
 
 def _write(
@@ -362,23 +427,40 @@ def catalogue() -> dict[str, Any]:
             except (OSError, json.JSONDecodeError):
                 continue
             timesteps = sorted(p.stem for p in directory.glob("*.json") if p.stem != "latest")
-            variables.append(
-                {
-                    "variable": sidecar.get("variable", directory.name),
-                    "unit": sidecar.get("unit"),
-                    "valid_time": sidecar.get("valid_time"),
-                    "generated_at": sidecar.get("generated_at"),
-                    "provenance": sidecar.get("provenance"),
-                    "lineage": sidecar.get("lineage", []),
-                    "method": sidecar.get("method"),
-                    "bounds": sidecar.get("bounds"),
-                    "bytes": sidecar.get("bytes"),
-                    "colormap": sidecar.get("colormap"),
-                    "statistics": sidecar.get("statistics"),
-                    "png": f"/rasters/{directory.name}/latest.png",
-                    "sidecar": f"/rasters/{directory.name}/latest.json",
-                    "timesteps": timesteps,
-                }
-            )
+            entry = {
+                "variable": sidecar.get("variable", directory.name),
+                "unit": sidecar.get("unit"),
+                "valid_time": sidecar.get("valid_time"),
+                "generated_at": sidecar.get("generated_at"),
+                "provenance": sidecar.get("provenance"),
+                "lineage": sidecar.get("lineage", []),
+                "method": sidecar.get("method"),
+                "bounds": sidecar.get("bounds"),
+                "bytes": sidecar.get("bytes"),
+                "colormap": sidecar.get("colormap"),
+                "statistics": sidecar.get("statistics"),
+                "png": f"/rasters/{directory.name}/latest.png",
+                "sidecar": f"/rasters/{directory.name}/latest.json",
+                "timesteps": timesteps,
+            }
+            # Pass through the kind-specific blocks rather than hand-picking a
+            # fixed key list. Dropping `encoding` left the client unable to decode
+            # a u/v PNG at all: the layer listed, the toggle worked, the image
+            # returned 200, and nothing drew — a silent failure caused by the
+            # catalogue, not by the layer.
+            for optional in (
+                "kind",
+                "encoding",
+                "direction_convention",
+                "convention_note",
+                "particle_speed",
+                "label",
+                "description",
+                "pfz",
+                "zones",
+            ):
+                if optional in sidecar:
+                    entry[optional] = sidecar[optional]
+            variables.append(entry)
 
     return {"generated_at": utcnow().isoformat(), "variables": variables}
