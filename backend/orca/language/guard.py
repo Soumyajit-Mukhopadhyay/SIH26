@@ -114,6 +114,57 @@ PROTECTED_NAMES: tuple[str, ...] = (
     "PFZ",
 )
 
+#: Units that must survive translation verbatim, because mistranslating them
+#: changes the PHYSICAL QUANTITY rather than the wording.
+#:
+#: Found in a real Tamil advisory: "wind = 14.7 kn (limit 22 kn)" came back as
+#: "காற்று = 14.7 கிலோ மீட்டர் (22 கிலோ மீட்டருக்கு வரம்பு)" — knots rendered as
+#: kilometres. Every numeral survived the guard intact and the sentence was
+#: nonetheless wrong about the quantity, which is worse than a lost figure: a
+#: missing number is visibly missing, and 14.7 km of wind reads as a real
+#: measurement.
+#:
+#: **This list is deliberately narrow.** It is NOT every unit. Rendering "8.4 km"
+#: as "8.4 கிமீ" or "%" in Tamil is correct, idiomatic and clearer for the reader,
+#: and forcing those into Latin would make the advisory worse. What is protected
+#: is the set where a wrong translation swaps one quantity for another:
+#:
+#: * `kn`/`kt`/`knots` — confusable with km, and that is exactly what happened;
+#: * `nm` — a nautical mile, or a nanometre;
+#: * compound and derived units (`m/s`, `km/h`, `J/kg`, `hPa`) which have no
+#:   short vernacular form and get spelled out into something unrecognisable.
+PROTECTED_UNITS: tuple[str, ...] = (
+    "knots",
+    "kn",
+    "kt",
+    "nm",
+    "m/s",
+    "km/h",
+    "J/kg",
+    "hPa",
+    "degC",
+)
+
+#: A unit is only a unit when it follows a number.
+#:
+#: Anchored on a preceding digit rather than word-bounded, because `\bkt\b` and
+#: `\bm/s\b` are safe but `\bnm\b` is not and a bare `\bkn\b` in prose would be
+#: masked for no reason. "14.7 kn" is unambiguous; the word "kn" alone is noise.
+#:
+#: This is why terms are masked BEFORE numerals in `guarded_translate` — after
+#: masking, "14.7 kn" is "NUMTOKENAXX kn" and the digit this depends on is gone.
+_UNIT_RE = re.compile(
+    # Two fixed-width lookbehinds rather than consuming the space. Matching
+    # " kn" swallowed the separator, so the masked text read
+    # "NUMTOKENAXXTRMTOKENAXX" — a 22-character alphanumeric blob that Sarvam
+    # chopped, which failed the guard and sent three clauses of a real Tamil
+    # advisory back to English. Leaving the space in place keeps two tokens
+    # legible as two tokens, and a unit written without a space still matches.
+    r"(?:(?<=[0-9])|(?<=[0-9] ))(?:" + "|".join(re.escape(u) for u in PROTECTED_UNITS) + r")\b",
+    re.IGNORECASE,
+)
+
+
 #: Everything the guard protects, for reporting and for tests.
 #:
 #: Found the hard way. Asked to translate an advisory beginning "**NO-GO**",
@@ -121,12 +172,39 @@ PROTECTED_NAMES: tuple[str, ...] = (
 #: for those who go astray". Fluent, confident, and it destroyed the single word
 #: the whole advisory exists to convey. The number guard had protected every
 #: figure and waved the verdict straight through.
-PROTECTED_TERMS: tuple[str, ...] = PROTECTED_VERDICTS + PROTECTED_BEARINGS + PROTECTED_NAMES
+PROTECTED_TERMS: tuple[str, ...] = (
+    PROTECTED_VERDICTS + PROTECTED_BEARINGS + PROTECTED_NAMES + PROTECTED_UNITS
+)
+
+
+#: Every character a model might use where a hyphen belongs.
+#:
+#: The reporting model writes "NO‑GO" with U+2011 NON-BREAKING HYPHEN about half
+#: the time, which is typographically correct and completely defeated a pattern
+#: written with an ASCII hyphen. The verdict then went unmasked, was translated,
+#: and came back as "NO‽GO" — an interrobang in the middle of the one word the
+#: whole advisory exists to convey.
+#:
+#: Normalising the text would be the wrong fix: the guard's contract is that what
+#: comes out is byte-for-byte what went in, so the PATTERN widens and the original
+#: spelling is restored verbatim.
+_HYPHENS = "-\u2010\u2011\u2012\u2013\u2014\u2015\u2212"
+_HYPHEN_CLASS = f"[{re.escape(_HYPHENS)}]"
+
+
+def _hyphen_tolerant(term: str) -> str:
+    """A pattern for `term` that accepts any hyphen variant, and a space for one.
+
+    "NO-GO", "NO‑GO" and "NO GO" are the same verdict, and a guard that protects
+    only one of the three protects nothing in practice.
+    """
+    parts = [re.escape(p) for p in re.split(r"[-\s]", term) if p]
+    return f"(?:{_HYPHEN_CLASS}|\\s)".join(parts) if len(parts) > 1 else re.escape(term)
 
 
 def _alternation(terms: tuple[str, ...]) -> str:
     """Longest first, so "NO-GO" is masked before "GO" can match inside it."""
-    return "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True))
+    return "|".join(_hyphen_tolerant(t) for t in sorted(terms, key=len, reverse=True))
 
 
 #: Word-bounded throughout. Without \b, "GO" matched inside "going" and "NE"
@@ -139,13 +217,18 @@ _TERM_ANY_CASE_RE = re.compile(rf"\b(?:{_alternation(PROTECTED_NAMES)})\b", re.I
 def _iter_terms(text: str) -> list[re.Match[str]]:
     """Every protected term in the text, in position order.
 
-    Two regexes rather than one because the case rules differ, and they are
-    merged here so callers see a single ordered stream. Overlaps are impossible
-    in practice (no bearing is a substring of an acronym), but a later match
-    starting inside an earlier one is dropped rather than double-masked.
+    Three regexes rather than one because the matching rules differ — verdicts
+    and bearings are case-sensitive, agency names are not, and units are anchored
+    on a preceding digit — and they are merged here so callers see a single
+    ordered stream. A later match starting inside an earlier one is dropped rather
+    than double-masked.
     """
     matches = sorted(
-        [*_TERM_CASED_RE.finditer(text), *_TERM_ANY_CASE_RE.finditer(text)],
+        [
+            *_TERM_CASED_RE.finditer(text),
+            *_TERM_ANY_CASE_RE.finditer(text),
+            *_UNIT_RE.finditer(text),
+        ],
         key=lambda m: m.start(),
     )
     kept: list[re.Match[str]] = []
@@ -158,7 +241,7 @@ def _iter_terms(text: str) -> list[re.Match[str]]:
 
 
 _TERM_TOKEN = "TRMTOKEN{index}XX"
-_TERM_TOKEN_RE = re.compile(r"TRMTOKEN([A-Z]+)XX", re.IGNORECASE)
+_TERM_TOKEN_RE = re.compile(r"TRMTOKEN([A-WYZ]+)XX", re.IGNORECASE)
 
 #: The mask token. Chosen to survive translation: no spaces to be split on, and
 #: a shape unlike ordinary words so a model does not "correct" it.
@@ -168,23 +251,47 @@ _TERM_TOKEN_RE = re.compile(r"TRMTOKEN([A-Z]+)XX", re.IGNORECASE)
 #: to see no numerals at all, and a stray one is exactly the kind of thing a
 #: model decides to tidy up.
 _TOKEN = "NUMTOKEN{index}XX"
-_TOKEN_RE = re.compile(r"NUMTOKEN([A-Z]+)XX", re.IGNORECASE)
+_TOKEN_RE = re.compile(r"NUMTOKEN([A-WYZ]+)XX", re.IGNORECASE)
+
+
+#: The index alphabet, deliberately WITHOUT the letter X.
+#:
+#: The tokens end in "XX", so an index that could itself contain an X makes the
+#: terminator ambiguous. This is not theoretical: with a 26-letter alphabet,
+#: index 23 encodes to "X" and the token becomes NUMTOKENXXX — at which point the
+#: pattern can no longer tell where the index stops.
+#:
+#: The failure it actually caused was worse and did not need an X at all. Two
+#: tokens ending up adjacent, as they do when a unit immediately follows a
+#: numeral, produced "NUMTOKENAXXTRMTOKENAXX"; the greedy index group swallowed
+#: "AXXTRMTOKENA", the whole run matched as one token with an out-of-range index,
+#: and the replacement silently left it in place. The numeral was unrecoverable
+#: and the advisory shipped with a mask token where a wave height should have
+#: been. Excluding X from the alphabet lets the pattern stop at the first "XX",
+#: which fixes both.
+_INDEX_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWYZ"
+_INDEX_BASE = len(_INDEX_ALPHABET)
 
 
 def _encode_index(index: int) -> str:
-    """0 -> A, 1 -> B, ... 25 -> Z, 26 -> BA. Bijective enough for our purposes."""
+    """Bijective base-25 over :data:`_INDEX_ALPHABET`. 0 -> A, 1 -> B, ... 24 -> Z, 25 -> AA."""
     letters = ""
     index += 1
     while index:
-        index, remainder = divmod(index - 1, 26)
-        letters = chr(ord("A") + remainder) + letters
+        index, remainder = divmod(index - 1, _INDEX_BASE)
+        letters = _INDEX_ALPHABET[remainder] + letters
     return letters
 
 
 def _decode_index(letters: str) -> int:
     value = 0
     for char in letters.upper():
-        value = value * 26 + (ord(char) - ord("A") + 1)
+        position = _INDEX_ALPHABET.find(char)
+        if position < 0:
+            # Not one of ours. Signal out of range so the caller leaves the text
+            # alone rather than substituting whatever happens to be at index 0.
+            return -1
+        value = value * _INDEX_BASE + position + 1
     return value - 1
 
 
@@ -351,9 +458,14 @@ def unmask_terms(text: str, originals: list[str]) -> str:
 
 
 def missing_terms(source: str, output: str) -> list[str]:
-    """Protected terms present in the source and absent from the output."""
-    present = {m.group(0).upper() for m in _iter_terms(output)}
-    wanted = {m.group(0).upper() for m in _iter_terms(source)}
+    """Protected terms present in the source and absent from the output.
+
+    Stripped, because the unit pattern captures the space before a unit (it is
+    anchored on the preceding digit) and a report reading " KN" rather than "KN"
+    ends up on screen in front of a user.
+    """
+    present = {m.group(0).strip().upper() for m in _iter_terms(output)}
+    wanted = {m.group(0).strip().upper() for m in _iter_terms(source)}
     return sorted(wanted - present)
 
 
@@ -443,8 +555,13 @@ async def guarded_translate(
         checked.lost_terms,
     )
 
-    masked, originals = mask_numbers(text)
-    masked, terms = mask_terms(masked)
+    # Terms FIRST, then numerals. The unit pattern is anchored on a preceding
+    # digit, and once numbers are masked "14.7 kn" reads "NUMTOKENAXX kn" with no
+    # digit left to anchor on — so masking numbers first silently disables unit
+    # protection entirely. The token forms carry no digits (their indices are
+    # encoded as letters, deliberately), so this order is safe in reverse too.
+    masked, terms = mask_terms(text)
+    masked, originals = mask_numbers(masked)
     masked_translation = await translate(masked, **translate_kwargs)
     masked_translation = strip_alien_quotes(masked_translation, source=text)
     restored = unmask_terms(masked_translation, terms)

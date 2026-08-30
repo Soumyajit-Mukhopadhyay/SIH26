@@ -402,3 +402,131 @@ def test_an_apostrophe_is_never_stripped() -> None:
     English prose is full of them the cleanup almost never ran at all."""
     text = "the vessel's limit is 1.5 m"
     assert guard.strip_alien_quotes(text, source="the vessel's limit is 1.5 m") == text
+
+
+# --- units: the failure that survives a perfect number guard -----------------
+
+
+def test_knots_are_protected_because_they_came_back_as_kilometres() -> None:
+    """The defect this exists for, verbatim.
+
+    "wind = 14.7 kn (limit 22 kn)" came back from Sarvam as
+    "காற்று = 14.7 கிலோ மீட்டர் (22 கிலோ மீட்டருக்கு வரம்பு)" — knots rendered as
+    kilometres. Every numeral survived the guard intact and the sentence was
+    still wrong about the physical quantity, which is worse than a lost figure:
+    a missing number is visibly missing, and 14.7 km of wind reads as a real
+    measurement.
+    """
+    source = "Wind = 14.7 kn (limit 22 kn)"
+    mangled = "காற்று = 14.7 கிலோ மீட்டர் (22 கிலோ மீட்டருக்கு வரம்பு)"
+
+    result = guard.verify(source, mangled)
+    assert result.lost == [], "the numerals did survive — that is the whole point"
+    assert "KN" in result.lost_terms
+    assert result.ok is False
+
+
+def test_ordinary_units_are_left_free_to_translate() -> None:
+    """A narrow list on purpose. "8.4 கிமீ" is a correct and clearer rendering of
+    "8.4 km", and forcing every unit into Latin would make the advisory worse."""
+    masked, terms = guard.mask_terms("Visibility 8.4 km, swell 1.2 m, 40 % chance")
+    assert terms == []
+    assert "km" in masked and "%" in masked
+
+
+def test_compound_units_are_protected() -> None:
+    _, terms = guard.mask_terms("current 0.6 m/s, CAPE 3200 J/kg, pressure 1004 hPa, route 62 nm")
+    assert terms == ["m/s", "CAPE", "J/kg", "hPa", "nm"]
+
+
+def test_a_unit_only_counts_as_one_after_a_number() -> None:
+    """Anchored on a preceding digit rather than word-bounded: a bare "kn" or
+    "nm" in prose is noise, and "14.7 kn" is unambiguous."""
+    masked, terms = guard.mask_terms("we do not kn ow, and nm is not a unit here")
+    assert terms == []
+    assert masked == "we do not kn ow, and nm is not a unit here"
+
+
+def test_terms_are_masked_before_numerals() -> None:
+    """Order matters and is load-bearing.
+
+    The unit pattern needs the digit in front of it. Masking numbers first turns
+    "14.7 kn" into "NUMTOKENAXX kn", the digit is gone, and unit protection
+    silently stops working altogether.
+    """
+    text = "Wind 14.7 kn"
+    masked_terms, terms = guard.mask_terms(text)
+    masked_all, numbers = guard.mask_numbers(masked_terms)
+    assert terms == ["kn"]
+    assert numbers == ["14.7"]
+    restored = guard.unmask_terms(guard.unmask_numbers(masked_all, numbers), terms)
+    assert restored == text
+
+
+def test_adjacent_mask_tokens_stay_separable() -> None:
+    """The bug this encodes made a numeral UNRECOVERABLE.
+
+    A unit immediately following a numeral puts two tokens back to back:
+    "NUMTOKENAXXTRMTOKENAXX". With a 26-letter index alphabet the greedy group
+    swallowed "AXXTRMTOKENA", the whole run matched as one token with an
+    out-of-range index, and the replacement silently left it in place — so the
+    advisory shipped with a mask token where a wave height should have been.
+    """
+    text = "Wind 14.7 kn gusting 22 kn, current 0.6 m/s"
+    masked_terms, terms = guard.mask_terms(text)
+    masked_all, numbers = guard.mask_numbers(masked_terms)
+    # The separator is preserved on purpose — see _UNIT_RE — so the tokens are
+    # adjacent but not fused.
+    assert "NUMTOKENAXX TRMTOKENAXX" in masked_all
+    restored = guard.unmask_terms(guard.unmask_numbers(masked_all, numbers), terms)
+    assert restored == text
+
+
+def test_the_index_alphabet_cannot_contain_the_terminator() -> None:
+    """The tokens end in "XX", so an index containing an X makes the terminator
+    ambiguous. With 26 letters, index 23 encoded to exactly "X"."""
+    for index in range(80):
+        encoded = guard._encode_index(index)
+        assert "X" not in encoded, f"index {index} encoded to {encoded!r}"
+        assert guard._decode_index(encoded) == index
+
+
+def test_an_unrecognisable_index_is_rejected_rather_than_wrapped() -> None:
+    """Returning 0 for garbage would substitute the FIRST numeral wherever a
+    corrupted token appeared, which is a wrong figure rather than a visible one."""
+    assert guard._decode_index("XQ") == -1
+
+
+def test_many_numerals_in_one_sentence_all_survive() -> None:
+    """Forty figures crosses the single-letter index boundary twice."""
+    text = ", ".join(f"{n}.{n} kn" for n in range(1, 41))
+    masked_terms, terms = guard.mask_terms(text)
+    masked_all, numbers = guard.mask_numbers(masked_terms)
+    assert len(numbers) == 40
+    restored = guard.unmask_terms(guard.unmask_numbers(masked_all, numbers), terms)
+    assert restored == text
+
+
+def test_every_hyphen_variant_of_the_verdict_is_protected() -> None:
+    """The reporting model writes "NO‑GO" with U+2011 about half the time.
+
+    That is typographically correct and it completely defeated a pattern written
+    with an ASCII hyphen: the verdict went unmasked, was translated, and came
+    back as "NO‽GO" — an interrobang in the middle of the one word the whole
+    advisory exists to convey.
+    """
+    for spelling in ("NO-GO", "NO‑GO", "NO–GO", "NO—GO", "NO GO"):
+        text = f"**{spelling}** for your boat"
+        masked, terms = guard.mask_terms(text)
+        assert terms == [spelling], f"{spelling!r} was not protected"
+        # Restored byte-for-byte: widening the pattern must not normalise the text.
+        assert guard.unmask_terms(masked, terms) == text
+
+
+def test_a_mangled_verdict_is_reported_as_lost() -> None:
+    assert guard.missing_terms("**NO‑GO**", "NO‽GO") == ["NO‑GO"]
+
+
+def test_widening_the_hyphen_class_did_not_break_the_other_terms() -> None:
+    _, terms = guard.mask_terms("713 km SSW of INCOIS, CAUTION, CAPE 200 J/kg")
+    assert "SSW" in terms and "CAUTION" in terms and "CAPE" in terms
