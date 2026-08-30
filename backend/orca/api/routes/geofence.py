@@ -237,7 +237,10 @@ async def advisory_cap(request: CapRequest) -> Response:
             # Only include the translation if the number guard passed. A CAP
             # alert carrying a mistranslated wave height is worse than a
             # monolingual one.
-            if headline["safe_to_speak"] and instruction["safe_to_speak"]:
+            # `fully_translated`, not `safe_to_speak`: a CAP alert should carry a
+            # wholly-translated <info> block or none at all, since a downstream
+            # consumer cannot show a half-translated one sensibly.
+            if headline.get("fully_translated") and instruction.get("fully_translated"):
                 translated = {
                     "language": f"{request.translate_to}-IN",
                     "headline": headline["text"],
@@ -246,7 +249,7 @@ async def advisory_cap(request: CapRequest) -> Response:
                 }
             else:
                 log.warning(
-                    "omitting the %s <info> block: the number guard failed",
+                    "omitting the %s <info> block: not every clause could be verified",
                     request.translate_to,
                 )
         except TranslationUnavailable as exc:

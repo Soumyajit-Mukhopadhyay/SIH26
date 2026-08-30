@@ -11,11 +11,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from orca.language import detect as detect_module
 from orca.language import guard as guard_module
+from orca.language import speech as speech_module
 from orca.language import translate as translate_module
 from orca.provenance import utcnow
 
@@ -123,4 +125,106 @@ async def verify_numbers(payload: dict[str, str]) -> dict[str, Any]:
             "'2.4' and the Tamil rendering compare equal, but losing one of two identical "
             "figures is still caught."
         ),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# speech
+# --------------------------------------------------------------------------- #
+
+
+class SpeakRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2500)
+    language: str = "en"
+    speaker: str | None = None
+    pace: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
+@router.get("/voices", summary="Which languages ORCA can speak, and where the gaps are")
+async def voices() -> dict[str, Any]:
+    return {
+        "voices": speech_module.voice_roster(),
+        "tts_model": speech_module.BULBUL_MODEL,
+        "asr_indic": speech_module.SAARIKA_MODEL,
+        "asr_english": speech_module.WHISPER_MODEL,
+        "note": (
+            "The ASR provider is chosen per language, not globally. Saarika leads for the "
+            "Indic languages and Whisper for English: on the same Tamil clip Saarika "
+            "transcribed it exactly, numerals included, where Whisper garbled it."
+        ),
+    }
+
+
+@router.post("/speak", summary="Synthesise speech (returns WAV)")
+async def speak(request: SpeakRequest) -> Response:
+    """Speak text in one of the supported languages.
+
+    Returns ``audio/wav`` directly so the browser can play the response without a
+    second request. The headers name the voice actually used, including when it is
+    a substitute — Konkani has no native voice, and ORCA says so rather than
+    passing a Marathi voice off as Konkani.
+    """
+    if request.language not in detect_module.SUPPORTED:
+        raise HTTPException(status_code=422, detail=f"unsupported language {request.language!r}")
+
+    try:
+        result = await speech_module.synthesise(
+            request.text,
+            language=request.language,
+            speaker=request.speaker,
+            pace=request.pace,
+        )
+    except speech_module.SpeechUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    headers = {
+        "X-Orca-Speaker": result.speaker,
+        "X-Orca-Provider": result.provider,
+        "X-Orca-Duration-S": str(result.duration_s),
+        "X-Orca-Native-Voice": str(result.native_voice).lower(),
+        "Cache-Control": "no-store",
+    }
+    if result.voice_note:
+        headers["X-Orca-Voice-Note"] = result.voice_note
+
+    return Response(content=result.audio, media_type=result.mime, headers=headers)
+
+
+#: Module-level singletons: FastAPI wants these as defaults, and constructing
+#: them in the signature trips ruff's B008.
+_AUDIO_FILE = File(...)
+_LANGUAGE_FORM = Form("en")
+
+
+@router.post("/listen", summary="Transcribe uploaded audio")
+async def listen(
+    file: UploadFile = _AUDIO_FILE,
+    language: str = _LANGUAGE_FORM,
+) -> dict[str, Any]:
+    """Transcribe a recording, then detect the language of what came back.
+
+    The caller names the expected language because doing so materially improves
+    accuracy on the short clips a mic press produces. The detection returned is on
+    the TRANSCRIPT — so if someone selects English and speaks Tamil, the response
+    reveals it rather than answering the wrong question in the wrong language.
+    """
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(status_code=422, detail="the uploaded audio was empty")
+    if len(audio) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="audio must be under 12 MB")
+
+    try:
+        transcript = await speech_module.transcribe(
+            audio, language=language, filename=file.filename or "audio.wav"
+        )
+    except speech_module.SpeechUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    detected = detect_module.detect(transcript.text) if transcript.text else None
+    return {
+        **transcript.describe(),
+        "detected": detected.describe() if detected else None,
+        "bytes": len(audio),
+        "generated_at": utcnow().isoformat(),
     }

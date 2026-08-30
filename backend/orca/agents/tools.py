@@ -201,6 +201,101 @@ async def _forecast_window(lat: float, lon: float, days: int = 2, **_: Any) -> T
     )
 
 
+async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
+    """Nearest derived Potential Fishing Zone, as a distance and a bearing.
+
+    This tool exists because of a gap the multi-query work exposed: asked "is it
+    safe, and where are the fish?", ORCA answered the safety half and said "I have
+    no data on where fish are likely to be found" — while a derived PFZ field was
+    sitting on disk. The satellite-SST tool returns a temperature, which is an
+    input to the answer and not the answer.
+    """
+    import json
+
+    from orca.config import get_settings
+    from orca.services.geo import bearing_deg, compass_point, geodesic_m
+
+    path = get_settings().raster_dir / "pfz_rank" / "latest.json"
+    if not path.exists():
+        return ToolResult(
+            ok=False,
+            tool="find_fishing_zones",
+            summary="no PFZ has been derived yet",
+            error=(
+                "The PFZ field has not been generated in this deployment. It is derived by the "
+                "ingest job from SST and chlorophyll."
+            ),
+        )
+
+    try:
+        sidecar = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return ToolResult(
+            ok=False, tool="find_fishing_zones", summary="PFZ unreadable", error=str(exc)
+        )
+
+    zones = sidecar.get("zones") or []
+    if not zones:
+        derivation = sidecar.get("pfz", {})
+        return ToolResult(
+            ok=False,
+            tool="find_fishing_zones",
+            summary="no fishing zones in the current derivation",
+            error=(
+                "The derivation produced no qualifying zones. Missing inputs: "
+                f"{derivation.get('inputs_missing', [])}"
+            ),
+            data={"derivation": derivation},
+        )
+
+    scored = [(geodesic_m(lat, lon, z["centroid"]["lat"], z["centroid"]["lon"]), z) for z in zones]
+    scored.sort(key=lambda pair: pair[0])
+    # The best few, preferring higher rank at comparable distance — a rank 2 zone
+    # slightly further away is a better answer than the nearest rank 1.
+    best = sorted(scored[:12], key=lambda pair: (-pair[1]["rank"], pair[0]))[:3]
+
+    lines: list[str] = []
+    for distance_m, zone in best:
+        bearing = bearing_deg(lat, lon, zone["centroid"]["lat"], zone["centroid"]["lon"])
+        lines.append(
+            f"rank {zone['rank']} zone {distance_m / 1000:.0f} km "
+            f"{compass_point(bearing)}, about {zone['area_km2']:.0f} km2"
+        )
+
+    derivation = sidecar.get("pfz", {})
+    return ToolResult(
+        ok=True,
+        tool="find_fishing_zones",
+        summary="; ".join(lines),
+        data={
+            "zones": [
+                {
+                    "rank": zone["rank"],
+                    "distance_km": round(distance_m / 1000, 1),
+                    "bearing_deg": round(
+                        bearing_deg(lat, lon, zone["centroid"]["lat"], zone["centroid"]["lon"]), 1
+                    ),
+                    "compass": compass_point(
+                        bearing_deg(lat, lon, zone["centroid"]["lat"], zone["centroid"]["lon"])
+                    ),
+                    "area_km2": zone["area_km2"],
+                    "centroid": zone["centroid"],
+                    "h3": zone.get("h3"),
+                }
+                for distance_m, zone in best
+            ],
+            "derivation": derivation,
+            "valid_time": sidecar.get("valid_time"),
+            "lineage": sidecar.get("lineage", []),
+            "caveat": (
+                "INCOIS publishes PFZ advisories as maps, not as an API. This is ORCA's "
+                "reimplementation of the published methodology. "
+                f"Criteria that could not be applied: {derivation.get('inputs_missing', [])}."
+            ),
+        },
+    )
+
+
 async def _list_datasets(**_: Any) -> ToolResult:
     """Data discovery: what ORCA can actually read, and how current each is.
 
@@ -317,6 +412,29 @@ TOOLS: dict[str, Tool] = {
         ),
         run=_lookup_thresholds,
         owner="risk",
+    ),
+    "find_fishing_zones": Tool(
+        name="find_fishing_zones",
+        description=(
+            "THE ANSWER to 'where should I fish'. Nearest derived Potential Fishing Zones as a "
+            "distance and a compass bearing, with their rank. Use this for any question about "
+            "where the fish are — fetch_satellite_sst returns a temperature, which is an input "
+            "to that answer and not the answer itself."
+        ),
+        capability=Capability(
+            answers=("fishing", "pfz", "where_to_fish", "catch", "zone"),
+            resolution_deg=0.05,
+            latency_ms=5,
+            provenance="derived",
+            cost=1,
+            coverage="the Indian EEZ, wherever the ingest job has derived a PFZ",
+            notes=(
+                "Reads the PFZ the ingest job derived. Reports what criteria could not be "
+                "applied, so an absent rank reads as 'not checked' rather than 'poor water'."
+            ),
+        ),
+        run=_find_fishing_zones,
+        owner="ocean",
     ),
     "discover_datasets": Tool(
         name="discover_datasets",

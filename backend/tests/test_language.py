@@ -12,12 +12,16 @@ import pytest
 
 from orca.language.detect import detect, roster, script_histogram
 from orca.language.guard import (
+    PROTECTED_TERMS,
     extract_numbers,
     guarded_translate,
     mask_numbers,
+    mask_terms,
+    missing_terms,
     to_latin_digits,
     to_script_digits,
     unmask_numbers,
+    unmask_terms,
     verify,
 )
 
@@ -244,3 +248,72 @@ class TestRoster:
         for row in roster():
             if row["code"] != "kok":
                 assert row["tts"] is True
+
+
+class TestProtectedTerms:
+    """The verdict word must survive translation, exactly as the numerals must.
+
+    Found in production: asked to translate an advisory beginning "**NO-GO**",
+    Sarvam returned "**நெறிதவறிச் செல்வோருக்குத் தண்டனை**" — roughly "punishment
+    for those who go astray". Every figure was protected and the one word the
+    advisory exists to convey was destroyed.
+    """
+
+    def test_the_verdict_words_are_protected(self):
+        for verdict in ("NO-GO", "CAUTION", "UNVERIFIABLE", "GO"):
+            assert verdict in PROTECTED_TERMS
+
+    def test_a_lost_verdict_is_detected(self):
+        result = verify(
+            "**NO-GO** Wave height 2.4 m.",
+            "**நெறிதவறிச் செல்வோருக்குத் தண்டனை** அலை உயரம் 2.4 மீ.",
+        )
+        # The numerals survived, so a number-only guard would have passed this.
+        assert result.lost == []
+        assert result.lost_terms == ["NO-GO"]
+        assert not result.ok, "the guard must fail when the verdict word is gone"
+
+    def test_a_preserved_verdict_passes(self):
+        result = verify("**NO-GO** Wave height 2.4 m.", "**NO-GO** அலை உயரம் 2.4 மீ.")
+        assert result.ok
+        assert result.lost_terms == []
+
+    def test_masking_hides_the_term_from_the_translator(self):
+        masked, terms = mask_terms("NO-GO. Confirm with IMD or INCOIS.")
+        assert terms == ["NO-GO", "IMD", "INCOIS"]
+        for term in ("NO-GO", "IMD", "INCOIS"):
+            assert term not in masked
+
+    def test_masking_round_trips_exactly(self):
+        text = "NO-GO. Confirm with IMD or INCOIS on VHF."
+        masked, terms = mask_terms(text)
+        assert unmask_terms(masked, terms) == text
+
+    def test_longer_terms_mask_before_shorter_ones(self):
+        # "GO" is a substring of "NO-GO"; masking it first would corrupt both.
+        masked, terms = mask_terms("NO-GO")
+        assert terms == ["NO-GO"]
+        assert unmask_terms(masked, terms) == "NO-GO"
+
+    def test_missing_terms_is_case_insensitive(self):
+        assert missing_terms("Confirm with IMD.", "imd உடன் சரிபார்க்கவும்.") == []
+
+    async def test_a_translator_that_mangles_the_verdict_is_worked_around(self):
+        async def mangler(text: str) -> str:
+            # Destroys the verdict but leaves numbers alone — the exact failure
+            # a number-only guard let through.
+            return text.replace("NO-GO", "punishment for those who go astray")
+
+        result = await guarded_translate("NO-GO. Wave height 2.4 m.", translate=mangler)
+        assert result.ok, "masking should have protected the verdict"
+        assert result.strategy == "masked"
+        assert "NO-GO" in result.text
+
+    async def test_a_verdict_only_advisory_is_still_guarded(self):
+        # No numerals at all, so the guard must still engage on the term.
+        async def mangler(text: str) -> str:
+            return text.replace("CAUTION", "be a bit careful maybe")
+
+        result = await guarded_translate("CAUTION advised.", translate=mangler)
+        assert result.strategy == "masked"
+        assert "CAUTION" in result.text

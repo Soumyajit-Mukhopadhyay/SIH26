@@ -13,6 +13,7 @@ locale codes (``ta-IN``), not bare ISO 639 codes.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from orca.config import get_settings
@@ -162,6 +163,30 @@ async def translate_raw(text: str, *, source: str = "en", target: str = "ta") ->
     raise TranslationUnavailable("; ".join(errors))
 
 
+def _sentences(text: str) -> list[str]:
+    """Split into guardable units: sentences, and markdown list items.
+
+    Guarding per unit rather than per document is what makes a long answer
+    translatable at all. A compound advisory carries ~17 numerals across six
+    sentences; guarding the whole blob means one dropped figure anywhere discards
+    the entire translation, and the user gets English. Guarding each sentence
+    isolates the failure to that sentence.
+    """
+    units: list[str] = []
+    for block in text.split("\n"):
+        stripped = block.strip()
+        if not stripped:
+            continue
+        # A markdown bullet or heading is its own unit; splitting it further would
+        # separate a figure from its label.
+        if stripped.startswith(("-", "*", "#", ">")) or len(stripped) < 140:
+            units.append(stripped)
+            continue
+        parts = re.split(r"(?<=[.!?])\s+", stripped)
+        units.extend(part for part in parts if part.strip())
+    return units or [text]
+
+
 async def translate(
     text: str,
     *,
@@ -169,17 +194,24 @@ async def translate(
     target: str = "ta",
     keep_latin_digits: bool = True,
 ) -> dict[str, Any]:
-    """Translate, then prove every numeral survived.
+    """Translate, then prove every numeral and protected term survived.
+
+    Guarding runs **per sentence**, and a sentence that fails stays in the source
+    language while the rest is translated. A mostly-Tamil advisory with one
+    English clause is far more useful than an all-English one, and the
+    alternative — discarding a whole good translation because one figure moved in
+    one clause — is what the first version did.
 
     ``keep_latin_digits`` defaults to True on purpose: ASCII numerals are
-    universally readable on a phone and in a marine context, and rendering
-    "2.4" as "௨.௪" is authentic but harder for many readers to act on quickly.
-    The option exists because that is a judgement call, not a fact.
+    universally readable on a phone and in a marine context, and rendering "2.4"
+    as "௨.௪" is authentic but harder to act on quickly. That is a judgement call,
+    not a fact, hence the flag.
     """
     from orca.language.detect import target_script
     from orca.language.guard import guarded_translate
 
     provider_used = "none"
+    script = "latin" if keep_latin_digits else target_script(target)
 
     async def _call(payload: str) -> str:
         nonlocal provider_used
@@ -187,21 +219,76 @@ async def translate(
         provider_used = provider
         return translated
 
-    result = await guarded_translate(
-        text,
-        translate=_call,
-        target_script="latin" if keep_latin_digits else target_script(target),
-    )
+    units = _sentences(text)
+    translated_units: list[str] = []
+    failed_units: list[str] = []
+    strategies: list[str] = []
+    all_source_numbers: list[str] = []
+    all_output_numbers: list[str] = []
+    lost: list[str] = []
+    lost_terms: list[str] = []
+
+    for unit in units:
+        result = await guarded_translate(unit, translate=_call, target_script=script)
+        strategies.append(result.strategy)
+        all_source_numbers.extend(result.source_numbers)
+        if result.ok:
+            translated_units.append(result.text)
+            all_output_numbers.extend(result.output_numbers)
+        else:
+            # Keep this clause in the source language. The figures in it are then
+            # trivially correct, because they were never translated.
+            translated_units.append(unit)
+            failed_units.append(unit)
+            all_output_numbers.extend(result.source_numbers)
+            lost.extend(result.lost)
+            lost_terms.extend(result.lost_terms)
+
+    joined = "\n".join(translated_units)
+    fully_translated = not failed_units
+
+    # Recompute what is missing against the FINAL text, not against the failed
+    # attempts. Accumulating per-attempt losses reported figures as "lost" that
+    # are plainly present in the output — because the clause containing them was
+    # kept in English, which is the fix working, not a failure.
+    from orca.language.guard import verify
+
+    final_check = verify(text, joined)
 
     return {
-        "text": result.text if result.ok else text,
+        "text": joined,
         "source": source,
         "target": target,
         "provider": provider_used,
-        "guard": result.describe(),
-        # The caller MUST honour this. A failed guard means the translation may
-        # carry a wrong figure, and a wrong figure in a marine advisory is worse
-        # than an English one.
-        "safe_to_speak": result.ok,
-        "fallback_reason": None if result.ok else result.note,
+        "guard": {
+            # Did every figure and protected term survive into the final text?
+            # This is the safety question, and it is true even when some clauses
+            # stayed in English.
+            "ok": final_check.ok,
+            # Did the whole answer actually get translated?
+            "fully_translated": fully_translated,
+            "strategy": "+".join(sorted(set(strategies))),
+            "units": len(units),
+            "units_failed": len(failed_units),
+            "attempts": len(units),
+            "source_numbers": final_check.source_numbers,
+            "output_numbers": final_check.output_numbers,
+            "lost": final_check.lost,
+            "invented": final_check.invented,
+            "lost_terms": final_check.lost_terms,
+            "note": None
+            if fully_translated
+            else (
+                f"{len(failed_units)} of {len(units)} clauses could not be verified and were "
+                "left in the source language. Every figure shown is still correct: an "
+                "unverified clause is not translated rather than translated unsafely."
+            ),
+        },
+        # Speakable when the figures are intact. A clause that stayed in English
+        # carries its original numbers verbatim, so a mixed answer is safe.
+        "safe_to_speak": final_check.ok,
+        "fully_translated": fully_translated,
+        "fallback_reason": None
+        if fully_translated
+        else f"{len(failed_units)} clause(s) kept in the source language",
     }

@@ -55,6 +55,10 @@ class AgentRequest(BaseModel):
     thread_id: str | None = Field(
         default=None, description="Reuse to continue a conversation across a reload."
     )
+    #: Reply in this language and, when `speak` is set, voice it. The agent always
+    #: reasons in English internally; this governs only the reply.
+    reply_language: str | None = None
+    speak: bool = False
 
 
 def _sse(event: dict[str, object]) -> str:
@@ -136,6 +140,20 @@ async def agent_stream(request: AgentRequest) -> StreamingResponse:
                 event["run_id"] = run_id
                 collected.append(event)
                 yield _sse(event)
+
+                # Translate and voice the final answer as SEPARATE, later events.
+                # The English answer reaches the screen immediately and the Tamil
+                # audio arrives a moment behind it, rather than the whole reply
+                # waiting on a translation and a TTS call.
+                if event.get("type") == "final" and request.reply_language:
+                    async for extra in _localise(
+                        str(event.get("answer") or ""),
+                        request.reply_language,
+                        speak=request.speak,
+                    ):
+                        extra["run_id"] = run_id
+                        collected.append(extra)
+                        yield _sse(extra)
         finally:
             task.cancel()
             _remember(run_id, thread_id, request, collected)
@@ -152,6 +170,136 @@ async def agent_stream(request: AgentRequest) -> StreamingResponse:
             "X-Orca-Run-Id": run_id,
         },
     )
+
+
+async def _localise(answer: str, language: str, *, speak: bool) -> AsyncIterator[dict[str, object]]:
+    """Translate the final answer, then optionally voice it.
+
+    **The number-integrity guard governs both.** If it cannot confirm the figures
+    survived, the translation is emitted with ``ok: false`` and the audio is NOT
+    synthesised at all. A spoken advisory carrying a mistranslated wave height is
+    worse than an English one, and this is the last point at which that can be
+    stopped.
+    """
+    if not answer:
+        return
+
+    if language == "en":
+        if speak:
+            async for event in _voice(answer, "en"):
+                yield event
+        return
+
+    from orca.language.translate import TranslationUnavailable, translate
+
+    try:
+        result = await translate(answer, source="en", target=language)
+    except TranslationUnavailable as exc:
+        yield {
+            "type": "translation",
+            "at": utcnow().isoformat(),
+            "ok": False,
+            "language": language,
+            "detail": f"no translation provider available ({exc}); the English answer stands",
+        }
+        return
+
+    safe = bool(result["safe_to_speak"])
+    fully = bool(result.get("fully_translated", safe))
+    yield {
+        "type": "translation",
+        "at": utcnow().isoformat(),
+        "ok": safe,
+        "language": language,
+        "text": result["text"],
+        "provider": result["provider"],
+        "guard": result["guard"],
+        "fully_translated": fully,
+        "detail": None if fully else result["fallback_reason"],
+    }
+
+    if not speak:
+        return
+    if safe:
+        async for event in _voice(str(result["text"]), language):
+            yield event
+    else:
+        yield {
+            "type": "audio",
+            "at": utcnow().isoformat(),
+            "ok": False,
+            "detail": (
+                "Not spoken: the number-integrity guard could not confirm the figures "
+                "survived translation, and a spoken advisory with a wrong wave height is "
+                "worse than an English one."
+            ),
+        }
+
+
+#: Longest spoken advisory, in characters.
+#:
+#: A full compound answer synthesised to 66 seconds of Tamil. Nobody listens to
+#: 66 seconds of audio to find out whether to launch a boat, and a judge
+#: certainly will not — so the spoken version is the verdict plus the reason that
+#: drove it, and the screen carries the rest. The text is never truncated
+#: mid-figure: only whole lines are dropped.
+SPOKEN_CHAR_BUDGET = 320
+
+
+def _spoken_summary(text: str) -> str:
+    """Reduce an advisory to what is worth hearing.
+
+    Keeps the verdict line and then as many following lines as fit, dropping
+    whole lines rather than cutting one in half — a spoken advisory that stops
+    halfway through "wave height is 2." is worse than a shorter one.
+    """
+    lines = [line.strip(" -*#>") for line in text.splitlines() if line.strip()]
+    if not lines:
+        return text
+
+    kept: list[str] = []
+    budget = SPOKEN_CHAR_BUDGET
+    for line in lines:
+        # The standing disclaimer is on screen; speaking it every time buries the
+        # verdict under boilerplate.
+        if "supplements, never replaces" in line:
+            continue
+        if len(line) > budget and kept:
+            break
+        kept.append(line)
+        budget -= len(line) + 1
+
+    return ". ".join(kept) if kept else lines[0]
+
+
+async def _voice(text: str, language: str) -> AsyncIterator[dict[str, object]]:
+    from orca.language.speech import SpeechUnavailable, synthesise
+
+    spoken = _spoken_summary(text)
+    try:
+        speech = await synthesise(spoken, language=language)
+    except SpeechUnavailable as exc:
+        yield {
+            "type": "audio",
+            "at": utcnow().isoformat(),
+            "ok": False,
+            "detail": f"speech synthesis unavailable: {exc}",
+        }
+        return
+
+    yield {
+        "type": "audio",
+        "at": utcnow().isoformat(),
+        "ok": True,
+        # A data: URI, so the browser plays it with no second round trip.
+        "audio": speech.as_data_uri(),
+        # What was actually spoken, which is a summary rather than the whole
+        # answer. Surfaced so the UI can show it under the play button instead of
+        # leaving the user wondering why the audio said less than the text.
+        "spoken_text": spoken,
+        "summarised": spoken != text.strip(),
+        **speech.describe(),
+    }
 
 
 def _remember(

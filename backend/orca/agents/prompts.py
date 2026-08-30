@@ -46,7 +46,10 @@ Hard requirements:
 - `assess_risk` needs live conditions, so put `fetch_marine_conditions` before it.
 - If the question is about tomorrow, a window, a trend or planning, include
   `fetch_forecast_window`.
-- If the question is about temperature, fishing grounds or fronts, include
+- If the question is about WHERE TO FISH, include `find_fishing_zones` — that is
+  the tool that answers it. `fetch_satellite_sst` returns a temperature, which is
+  context for the answer and not the answer.
+- If the question is about sea temperature or thermal fronts, include
   `fetch_satellite_sst`.
 - If the question is about where the data comes from, include `discover_datasets`.
 
@@ -81,7 +84,10 @@ Style:
 - Lead with the verdict, in bold, on its own line. Never bury it.
 - Then the reason, quoting the actual figures and the actual limits.
 - Then what would change it, if the answer is not GO.
-- Six sentences maximum. This may be read on a phone, at a harbour, in a hurry.
+- Six sentences maximum, or eight for a compound question. This may be read on a
+  phone, at a harbour, in a hurry.
+- For a compound question, answer each part in the order asked, one short
+  paragraph or bullet each. Do not merge them into a single paragraph.
 - Plain language. No jargon a fisherman would not use. No filler openings.
 - Use markdown sparingly: bold for the verdict, a short bullet list for reasons.
 
@@ -96,8 +102,16 @@ def reporting_user(
     place: str | None,
     loa_m: float,
     revision_note: str | None = None,
+    sub_questions: list[str] | None = None,
 ) -> str:
     sections = [f"QUESTION: {question}", f"VESSEL: {loa_m} m length overall"]
+    if sub_questions and len(sub_questions) > 1:
+        numbered = "\n".join(f"  {i + 1}. {q}" for i, q in enumerate(sub_questions))
+        sections.append(
+            "THIS IS A COMPOUND QUESTION. You MUST address every part below. "
+            "Answering only the first is the most common way to look like you were "
+            "not listening.\n" + numbered
+        )
     if place:
         sections.append(f"LOCATION: {place}")
 

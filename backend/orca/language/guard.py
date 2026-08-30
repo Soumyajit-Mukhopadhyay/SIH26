@@ -59,6 +59,38 @@ _TO_LATIN = {
 _ALL_DIGITS = "".join(DIGIT_SETS.values())
 _NUMBER = re.compile(rf"[{_ALL_DIGITS}]+(?:[.,][{_ALL_DIGITS}]+)*")
 
+#: Terms that must survive translation VERBATIM, for the same reason numerals
+#: must: they carry the decision, not the prose.
+#:
+#: Found the hard way. Asked to translate an advisory beginning "**NO-GO**",
+#: Sarvam returned "**நெறிதவறிச் செல்வோருக்குத் தண்டனை**" — roughly "punishment
+#: for those who go astray". Fluent, confident, and it destroyed the single word
+#: the whole advisory exists to convey. The number guard had protected every
+#: figure and waved the verdict straight through.
+PROTECTED_TERMS: tuple[str, ...] = (
+    "NO-GO",
+    "NO GO",
+    "CAUTION",
+    "UNVERIFIABLE",
+    "GO",
+    "IMD",
+    "INCOIS",
+    "ORCA",
+    "VHF",
+    "EEZ",
+    "IMBL",
+    "PFZ",
+    "CAPE",
+)
+
+#: Longest first, so "NO-GO" is masked before "GO" can match inside it.
+_TERM_RE = re.compile(
+    "|".join(re.escape(t) for t in sorted(PROTECTED_TERMS, key=len, reverse=True)),
+    re.IGNORECASE,
+)
+_TERM_TOKEN = "TRMTOKEN{index}XX"
+_TERM_TOKEN_RE = re.compile(r"TRMTOKEN([A-Z]+)XX", re.IGNORECASE)
+
 #: The mask token. Chosen to survive translation: no spaces to be split on, and
 #: a shape unlike ordinary words so a model does not "correct" it.
 #:
@@ -139,6 +171,8 @@ class GuardResult:
     lost: list[str] = field(default_factory=list)
     #: Numbers the output invented.
     invented: list[str] = field(default_factory=list)
+    #: Protected terms (verdict words, agency names) lost in translation.
+    lost_terms: list[str] = field(default_factory=list)
     #: How many attempts the guard needed.
     attempts: int = 1
     strategy: str = "direct"
@@ -153,6 +187,7 @@ class GuardResult:
             "output_numbers": self.output_numbers,
             "lost": self.lost,
             "invented": self.invented,
+            "lost_terms": self.lost_terms,
             "note": self.note,
         }
 
@@ -189,6 +224,34 @@ def unmask_numbers(text: str, originals: list[str], *, script: str = "latin") ->
     return _TOKEN_RE.sub(replace, text)
 
 
+def mask_terms(text: str) -> tuple[str, list[str]]:
+    """Replace protected terms with opaque tokens, preserving their original case."""
+    originals: list[str] = []
+
+    def replace(match: re.Match[str]) -> str:
+        originals.append(match.group(0))
+        return _TERM_TOKEN.format(index=_encode_index(len(originals) - 1))
+
+    return _TERM_RE.sub(replace, text), originals
+
+
+def unmask_terms(text: str, originals: list[str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        index = _decode_index(match.group(1))
+        if not 0 <= index < len(originals):
+            return match.group(0)
+        return originals[index]
+
+    return _TERM_TOKEN_RE.sub(replace, text)
+
+
+def missing_terms(source: str, output: str) -> list[str]:
+    """Protected terms present in the source and absent from the output."""
+    present = {m.group(0).upper() for m in _TERM_RE.finditer(output)}
+    wanted = {m.group(0).upper() for m in _TERM_RE.finditer(source)}
+    return sorted(wanted - present)
+
+
 def verify(source: str, output: str) -> GuardResult:
     """Compare the numerals in two texts as multisets.
 
@@ -212,13 +275,15 @@ def verify(source: str, output: str) -> GuardResult:
         else:
             lost.append(number)
 
+    lost_terms = missing_terms(source, output)
     return GuardResult(
         text=output,
-        ok=not lost and not remaining,
+        ok=not lost and not remaining and not lost_terms,
         source_numbers=source_numbers,
         output_numbers=output_numbers,
         lost=lost,
         invented=remaining,
+        lost_terms=lost_terms,
     )
 
 
@@ -245,9 +310,10 @@ async def guarded_translate(
        the translation rather than voice a wrong figure.
     """
     source_numbers = extract_numbers(text)
+    source_terms = [m.group(0) for m in _TERM_RE.finditer(text)]
 
-    # No numbers: nothing to guard, and the direct translation is best.
-    if not source_numbers:
+    # Nothing to guard: no numerals AND no protected terms.
+    if not source_numbers and not source_terms:
         translated = await translate(text, **translate_kwargs)
         return GuardResult(
             text=translated,
@@ -264,22 +330,26 @@ async def guarded_translate(
         return checked
 
     log.warning(
-        "translation altered numerals (lost=%s invented=%s); retrying with masking",
+        "translation altered protected content (numerals lost=%s invented=%s, terms lost=%s); "
+        "retrying with masking",
         checked.lost,
         checked.invented,
+        checked.lost_terms,
     )
 
     masked, originals = mask_numbers(text)
+    masked, terms = mask_terms(masked)
     masked_translation = await translate(masked, **translate_kwargs)
-    restored = unmask_numbers(masked_translation, originals, script=target_script)
+    restored = unmask_terms(masked_translation, terms)
+    restored = unmask_numbers(restored, originals, script=target_script)
 
     result = verify(text, restored)
     result.attempts = 2
     result.strategy = "masked"
     if result.ok:
         result.note = (
-            "The direct translation altered a number, so ORCA masked the numerals, "
-            "translated, and re-inserted the originals verbatim."
+            "The direct translation altered a number or a protected term, so ORCA masked "
+            "both, translated, and re-inserted the originals verbatim."
         )
         return result
 
@@ -288,9 +358,9 @@ async def guarded_translate(
     result.strategy = "failed"
     result.ok = False
     result.note = (
-        "Both direct and masked translation lost or altered a numeral. The translated text "
-        "must NOT be spoken or shown as an advisory — fall back to English, or to the "
-        "figures alone."
+        "Both direct and masked translation lost or altered a numeral or a protected term "
+        "(a verdict word, or an agency name). The translated text must NOT be spoken or "
+        "shown as an advisory — fall back to English."
     )
     log.error(
         "number guard failed for %r: lost=%s invented=%s", text[:80], result.lost, result.invented

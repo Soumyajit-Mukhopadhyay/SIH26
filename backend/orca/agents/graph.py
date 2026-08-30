@@ -42,12 +42,25 @@ from langgraph.graph import END, StateGraph
 
 from orca.agents import prompts
 from orca.agents.llm import LlmUnavailable, complete
+from orca.agents.multiquery import Decomposition, decompose
 from orca.agents.tools import catalogue, run_tool
 from orca.provenance import Evidence, evidence_summary, utcnow
 
 log = logging.getLogger(__name__)
 
 MAX_CRITIC_ROUNDS = 2
+
+#: Tool execution order. `assess_risk` needs conditions, so conditions come
+#: first regardless of the order the planner or the decomposition proposed.
+_TOOL_ORDER = (
+    "fetch_marine_conditions",
+    "fetch_forecast_window",
+    "fetch_satellite_sst",
+    "find_fishing_zones",
+    "lookup_boat_thresholds",
+    "assess_risk",
+    "discover_datasets",
+)
 
 
 def _append(left: list[Any], right: list[Any]) -> list[Any]:
@@ -77,6 +90,10 @@ class OrcaState(TypedDict, total=False):
     tool_results: Annotated[list[dict[str, Any]], _append]
     evidence: Annotated[list[Evidence], _append]
     events: Annotated[list[dict[str, Any]], _append]
+
+    #: The question, split into answerable parts. A compound question that gets
+    #: one answer reads as the system not listening.
+    decomposition: dict[str, Any]
 
     draft: str
     answer: str
@@ -144,19 +161,30 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 
 async def interaction(state: OrcaState) -> OrcaState:
-    """Normalise the request. No LLM: this is bookkeeping."""
-    return {
-        "events": [
+    """Normalise the request, and split a compound question into its parts."""
+    split: Decomposition = await decompose(state["question"])
+
+    detail = (
+        f"question received · {state.get('lat', 0):.3f}°N "
+        f"{state.get('lon', 0):.3f}°E · vessel {state.get('loa_m', 8.2)} m"
+    )
+    if split.is_compound:
+        detail += f" · {len(split.parts)} sub-questions detected"
+
+    events = [_event("step", node="interaction", status="done", detail=detail)]
+    if split.is_compound:
+        events.append(
             _event(
-                "step",
-                node="interaction",
-                status="done",
-                detail=(
-                    f"question received · {state.get('lat', 0):.3f}°N "
-                    f"{state.get('lon', 0):.3f}°E · vessel {state.get('loa_m', 8.2)} m"
-                ),
+                "decomposition",
+                parts=[p.describe() for p in split.parts],
+                method=split.method,
+                tools=split.tools,
             )
-        ],
+        )
+
+    return {
+        "decomposition": split.describe(),
+        "events": events,
         "critic_rounds": 0,
     }
 
@@ -184,6 +212,9 @@ async def planner(state: OrcaState) -> OrcaState:
         },
     ]
 
+    split = state.get("decomposition") or {}
+    required: list[str] = list(split.get("tools") or [])
+
     plan: list[PlanStep] = []
     rationale = ""
     provider = "fallback"
@@ -206,6 +237,27 @@ async def planner(state: OrcaState) -> OrcaState:
                     )
     except LlmUnavailable as exc:
         log.warning("planner had no LLM, using the safety-first fallback: %s", exc)
+
+    # Every tool the decomposition needs must be in the plan. The planner may add
+    # to this but not drop from it: a sub-question whose tool never runs is a
+    # question the user asked and ORCA silently ignored.
+    if required:
+        present = {step["tool"] for step in plan}
+        for tool in required:
+            if tool not in present:
+                plan.append(
+                    {
+                        "id": len(plan) + 1,
+                        "tool": tool,
+                        "why": "required by a sub-question the planner did not cover",
+                        "status": "pending",
+                    }
+                )
+        # Re-establish the ordering constraint: conditions before the verdict.
+        order = {name: i for i, name in enumerate(_TOOL_ORDER)}
+        plan.sort(key=lambda step: order.get(step["tool"], 99))
+        for index, step in enumerate(plan):
+            step["id"] = index + 1
 
     if not plan:
         # Safety-first default. Conditions, then the deterministic verdict.
@@ -631,6 +683,7 @@ async def run(
     yield _event(
         "final",
         answer=final.get("answer") or final.get("draft", ""),
+        decomposition=final.get("decomposition"),
         risk=final.get("risk"),
         ui_spec=final.get("ui_spec"),
         plan=final.get("plan", []),
