@@ -1,0 +1,2352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ORCA — How It Works, End to End</title>
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 18mm 18mm 18mm;
+    @bottom-center { content: counter(page); }
+  }
+
+  :root {
+    --ink: #14181d;
+    --ink-2: #3d454f;
+    --ink-3: #6b7480;
+    --rule: #d8dee6;
+    --accent: #0b6b8a;
+    --accent-soft: #eaf4f8;
+    --warn: #8a5a0b;
+    --warn-soft: #fdf6e7;
+    --stop: #8a1f16;
+    --stop-soft: #fbeeec;
+    --go: #14603f;
+    --go-soft: #ecf7f1;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: "Charter", "Georgia", "Cambria", serif;
+    font-size: 10.5pt;
+    line-height: 1.62;
+    color: var(--ink);
+  }
+
+  h1, h2, h3, h4, .label, .cover-sub, table, .box-title, .glossary dt {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  /* ---------------------------------------------------------------- cover */
+  .cover {
+    height: 247mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    page-break-after: always;
+  }
+  .cover .mark {
+    font-size: 40pt;
+    letter-spacing: 0.34em;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 0 0 6mm;
+  }
+  .cover h1 {
+    font-size: 19pt;
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 0 0 3mm;
+    max-width: 145mm;
+  }
+  .cover-sub {
+    font-size: 11pt;
+    color: var(--ink-2);
+    max-width: 140mm;
+    line-height: 1.55;
+  }
+  .cover .meta {
+    margin-top: 14mm;
+    border-top: 2px solid var(--accent);
+    padding-top: 5mm;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 9pt;
+    color: var(--ink-3);
+    display: grid;
+    grid-template-columns: 34mm 1fr;
+    row-gap: 1.6mm;
+  }
+  .cover .meta b { color: var(--ink); font-weight: 600; }
+
+  /* -------------------------------------------------------------- headings */
+  h2 {
+    font-size: 15pt;
+    font-weight: 600;
+    margin: 0 0 1mm;
+    padding-bottom: 2mm;
+    border-bottom: 2px solid var(--accent);
+    color: var(--accent);
+    page-break-after: avoid;
+  }
+  .part {
+    page-break-before: always;
+  }
+  .part-no {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 8.5pt;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 2mm;
+  }
+  h3 {
+    font-size: 11.5pt;
+    font-weight: 600;
+    margin: 7mm 0 1.5mm;
+    color: var(--ink);
+    page-break-after: avoid;
+  }
+  h4 {
+    font-size: 10pt;
+    font-weight: 600;
+    margin: 5mm 0 1mm;
+    color: var(--ink-2);
+    page-break-after: avoid;
+  }
+  p { margin: 0 0 3mm; }
+  p.lead {
+    font-size: 11.5pt;
+    color: var(--ink-2);
+    line-height: 1.55;
+  }
+
+  ul, ol { margin: 0 0 3.5mm; padding-left: 6mm; }
+  li { margin-bottom: 1.4mm; }
+
+  code, .mono {
+    font-family: "Consolas", "SF Mono", "Menlo", monospace;
+    font-size: 9pt;
+    background: #f2f4f7;
+    padding: 0.4mm 1mm;
+    border-radius: 1mm;
+  }
+
+  /* ---------------------------------------------------------------- boxes */
+  .box {
+    border: 1px solid var(--rule);
+    border-left: 3.5px solid var(--accent);
+    background: #fbfcfd;
+    padding: 3.5mm 4mm;
+    margin: 4mm 0;
+    page-break-inside: avoid;
+  }
+  .box.plain   { border-left-color: var(--accent); background: var(--accent-soft); }
+  .box.caution { border-left-color: var(--warn);   background: var(--warn-soft); }
+  .box.stop    { border-left-color: var(--stop);   background: var(--stop-soft); }
+  .box.good    { border-left-color: var(--go);     background: var(--go-soft); }
+  .box-title {
+    font-size: 8pt;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 1.6mm;
+    color: var(--accent);
+  }
+  .box.caution .box-title { color: var(--warn); }
+  .box.stop .box-title    { color: var(--stop); }
+  .box.good .box-title    { color: var(--go); }
+  .box p:last-child, .box ul:last-child { margin-bottom: 0; }
+
+  /* --------------------------------------------------------------- tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8.8pt;
+    margin: 3mm 0 4mm;
+    page-break-inside: avoid;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 7.8pt;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    border-bottom: 1.5px solid var(--ink-3);
+    padding: 1.6mm 2mm 1.6mm 0;
+    vertical-align: bottom;
+  }
+  td {
+    padding: 1.8mm 2mm 1.8mm 0;
+    border-bottom: 0.5px solid var(--rule);
+    vertical-align: top;
+    line-height: 1.45;
+  }
+  td:last-child, th:last-child { padding-right: 0; }
+  table.tight td, table.tight th { padding-top: 1.2mm; padding-bottom: 1.2mm; }
+
+  .pill {
+    display: inline-block;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 7.2pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.5mm 1.6mm;
+    border-radius: 1mm;
+    white-space: nowrap;
+  }
+  .pill.built   { background: var(--go-soft);   color: var(--go);   border: 0.5px solid #a8ccb8; }
+  .pill.partial { background: var(--warn-soft); color: var(--warn); border: 0.5px solid #dcc48a; }
+  .pill.later   { background: #f0f2f5;          color: var(--ink-3);border: 0.5px solid var(--rule); }
+
+  /* ---------------------------------------------------------------- flows */
+  .flow {
+    margin: 4mm 0;
+    page-break-inside: avoid;
+  }
+  .flow-step {
+    display: grid;
+    grid-template-columns: 8mm 1fr;
+    gap: 3mm;
+    padding-bottom: 3mm;
+  }
+  .flow-num {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 8pt;
+    font-weight: 700;
+    color: #fff;
+    background: var(--accent);
+    width: 6.5mm;
+    height: 6.5mm;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .flow-step h5 {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 9.5pt;
+    font-weight: 600;
+    margin: 0.6mm 0 0.8mm;
+  }
+  .flow-step p { margin: 0 0 1mm; font-size: 9.8pt; }
+
+  /* ------------------------------------------------------------- glossary */
+  .glossary { column-count: 2; column-gap: 8mm; font-size: 9pt; }
+  .glossary dt {
+    font-weight: 600;
+    font-size: 9pt;
+    margin-top: 2.6mm;
+    break-after: avoid;
+    color: var(--ink);
+  }
+  .glossary dd {
+    margin: 0.4mm 0 0;
+    line-height: 1.5;
+    color: var(--ink-2);
+  }
+  .glossary dd:first-line { }
+
+  .kicker {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 8pt;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 6mm 0 1mm;
+  }
+  .rule { border: 0; border-top: 0.5px solid var(--rule); margin: 6mm 0; }
+  .avoid-break { page-break-inside: avoid; }
+
+  /* ASCII-art style layer diagram, but drawn with CSS */
+  .stack { margin: 4mm 0; page-break-inside: avoid; }
+  .layer {
+    border: 1px solid var(--rule);
+    border-radius: 1.5mm;
+    padding: 2.4mm 3mm;
+    margin-bottom: 1.6mm;
+    background: #fff;
+    display: grid;
+    grid-template-columns: 32mm 1fr;
+    gap: 3mm;
+    align-items: baseline;
+  }
+  .layer .n {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 8.6pt;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+  .layer .d { font-size: 9.2pt; color: var(--ink-2); line-height: 1.45; }
+  .layer.core {
+    border: 1.5px solid var(--go);
+    background: var(--go-soft);
+  }
+  .layer.core .n { color: var(--go); }
+  .arrow {
+    text-align: center;
+    color: var(--ink-3);
+    font-size: 9pt;
+    line-height: 1;
+    margin: 0.4mm 0 1.6mm;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================ COVER -->
+<section class="cover">
+  <div class="mark">ORCA</div>
+  <h1>How It Works, End to End</h1>
+  <p class="cover-sub">
+    A complete architectural explanation of ORCA — written so that someone with no
+    background in software, oceanography or artificial intelligence can follow every
+    part of it. Every abbreviation is spelled out. Every technical term is explained
+    the first time it appears, and again in the glossary at the back. Everything we
+    have <em>not</em> built is listed as plainly as everything we have.
+  </p>
+  <div class="meta">
+    <span>Full name</span><b>Marine EcOsystem Reasoning with Collaborative Agents</b>
+    <span>Submitted to</span><b>Smart India Hackathon 2026</b>
+    <span>Coverage area</span><b>The Indian Exclusive Economic Zone — 60°E to 100°E, 0°N to 25°N</b>
+    <span>Who it is for</span><b>Small-boat fishermen, and the authorities who advise them</b>
+    <span>What it does</span><b>Answers "is it safe to go out, and where should I fish?" — in the user's own language, out loud, with every number's source shown</b>
+    <span>Document</span><b>Architecture reference · plain language edition</b>
+  </div>
+</section>
+
+<!-- ============================================================ HOW TO READ -->
+<section class="part">
+  <div class="part-no">Before you begin</div>
+  <h2>How to read this document</h2>
+
+  <p class="lead">
+    This is a long document because it is complete. You do not have to read it in
+    order. Here is what each part is for, so you can go straight to what you need.
+  </p>
+
+  <table>
+    <thead><tr><th style="width:26mm">Part</th><th style="width:44mm">What it covers</th><th>Read it if…</th></tr></thead>
+    <tbody>
+      <tr><td><b>1</b></td><td>What ORCA is</td><td>…you want the whole idea in three pages, with no jargon at all.</td></tr>
+      <tr><td><b>2</b></td><td>The fifteen words</td><td>…you keep hitting terms you do not recognise. Read this once and the rest gets easy.</td></tr>
+      <tr><td><b>3</b></td><td>The one big idea</td><td>…you want to understand <em>why</em> ORCA is built the way it is. This is the most important part.</td></tr>
+      <tr><td><b>4</b></td><td>The architecture, layer by layer</td><td>…you are technical, or you want to know what each piece of the system does.</td></tr>
+      <tr><td><b>5</b></td><td>Three journeys</td><td>…you learn better by following one real request all the way through.</td></tr>
+      <tr><td><b>6</b></td><td>The science</td><td>…you want to know whether the maths is real or decorative.</td></tr>
+      <tr><td><b>7</b></td><td>What we refuse to do</td><td>…you are evaluating safety and honesty.</td></tr>
+      <tr><td><b>8</b></td><td>What is not built yet</td><td>…you want the gaps, stated by us rather than found by you.</td></tr>
+      <tr><td><b>9</b></td><td>Glossary A–Z</td><td>…you need to look up one term.</td></tr>
+      <tr><td><b>10</b></td><td>The system in numbers</td><td>…you want the scale of the thing on one page.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box plain">
+    <div class="box-title">A note on honesty in this document</div>
+    <p>
+      Everywhere we describe a feature, we mark it. <span class="pill built">Built</span>
+      means it works right now against live data.
+      <span class="pill partial">Partial</span> means it works with a limitation, and the
+      limitation is written down.
+      <span class="pill later">Later</span> means we designed it and did not build it.
+    </p>
+    <p style="margin-top:2mm">
+      We do this because a document that only lists successes is not an architecture
+      document, it is an advertisement. A judge, an engineer, or a fisheries officer
+      reading this should be able to tell exactly what they would be relying on.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ PART 1 -->
+<section class="part">
+  <div class="part-no">Part 1</div>
+  <h2>What ORCA is</h2>
+
+  <p class="lead">
+    Every morning, along roughly 7,500 kilometres of Indian coastline, several
+    hundred thousand people have to answer one question: <em>should I take the boat
+    out today?</em> Getting it wrong is not an inconvenience. It is the leading cause
+    of death in Indian small-scale fishing.
+  </p>
+
+  <h3>The information already exists. It is just unusable.</h3>
+  <p>
+    India's oceanographic and meteorological agencies publish genuinely excellent
+    data. Wave heights, wind speeds, sea temperatures, thunderstorm forecasts, fishing
+    advisories. The problem is not the data. The problem is the last hundred metres
+    between the data and the person standing on the beach at four in the morning.
+  </p>
+  <p>That gap has four parts:</p>
+  <ul>
+    <li>
+      <b>Language.</b> The bulletins are in English. A large share of the people who
+      need them do not read English comfortably, and some do not read at all.
+    </li>
+    <li>
+      <b>Format.</b> A bulletin says "significant wave height 2.6 metres". It does not
+      say whether that is safe <em>for your boat</em>. A 6-metre wooden kattumaram and
+      a 20-metre steel trawler have wildly different tolerances, and the bulletin
+      cannot know which one you own.
+    </li>
+    <li>
+      <b>Fragmentation.</b> Waves come from one place, wind from another, thunderstorm
+      risk from a third, fishing advisories from a fourth. Nobody has time to check
+      four sources and mentally combine them.
+    </li>
+    <li>
+      <b>Trust.</b> If a system tells you "do not go out" and will not say why, you
+      will ignore it the second time. And you should.
+    </li>
+  </ul>
+
+  <h3>What ORCA does about it</h3>
+  <p>
+    ORCA is a piece of software you talk to. You can speak to it in Tamil, Hindi,
+    Bengali, Malayalam, Telugu, Kannada, Marathi, Gujarati, Odia, Konkani or English.
+    You can ask it more than one thing at once. It answers out loud, in the same
+    language, and it shows its working.
+  </p>
+
+  <p>Concretely, it does eight things:</p>
+
+  <table>
+    <thead><tr><th style="width:34mm">It can…</th><th>What that means in practice</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Decide</b></td>
+        <td>
+          Tap anywhere on the sea and ORCA gives one of four verdicts:
+          <b>GO</b>, <b>CAUTION</b>, <b>NO-GO</b>, or <b>UNVERIFIABLE</b> — judged
+          against <em>your</em> boat's published limits, not a generic threshold.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Refuse</b></td>
+        <td>
+          When it does not have enough information, it says <b>UNVERIFIABLE</b> and
+          names exactly what was missing. It never lets absent data look like calm
+          water.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Attribute</b></td>
+        <td>
+          Every single number on the screen shows where it came from, how old it is,
+          and how it was obtained. Nothing is unattributed.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Explain</b></td>
+        <td>
+          When you ask a question, you watch ORCA work: it announces its plan, then
+          fetches each piece of data one at a time with the real time each took, then
+          a separate checking step reviews the answer before you see it.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Speak and listen</b></td>
+        <td>
+          Press a button, talk, and ORCA transcribes it, answers it, and reads the
+          answer back — in eleven Indian languages.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Route</b></td>
+        <td>
+          Give it a destination and it plans a sea passage that avoids every patch of
+          water its own safety rules reject. If no safe route exists, it says so and
+          names the specific patches that block it.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Search</b></td>
+        <td>
+          If someone goes missing, ORCA calculates where the sea will have carried
+          them — as a <em>search area</em>, never as a single guessed point.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Warn</b></td>
+        <td>
+          It watches positions you care about and tells you when things get worse,
+          without being asked.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="box good">
+    <div class="box-title">The sentence that describes the whole product</div>
+    <p style="font-size:11pt">
+      ORCA answers a fisherman's question in his own language and out loud, shows
+      every number's source and age, computes the go / no-go with a fixed rule engine
+      that the artificial intelligence is <em>not permitted to overrule</em>, and says
+      "I cannot tell" when it cannot — which is the only version of this product that
+      is safe to put in front of a real person.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ PART 2 -->
+<section class="part">
+  <div class="part-no">Part 2</div>
+  <h2>The fifteen words you need</h2>
+
+  <p class="lead">
+    Almost all the jargon in this document is one of these fifteen things. Read this
+    page once and the rest of the document is plain reading. There is a full
+    alphabetical glossary in Part 9 for anything else.
+  </p>
+
+  <div class="glossary" style="column-count:1; font-size:9.6pt">
+  <dl>
+    <dt>1 &nbsp;·&nbsp; EEZ — Exclusive Economic Zone</dt>
+    <dd>
+      The band of sea a country controls economically, extending 200 nautical miles
+      (about 370 km) from its coast. India's EEZ is roughly 2.3 million square
+      kilometres. ORCA covers a rectangle around it: 60°E–100°E, 0°N–25°N.
+    </dd>
+
+    <dt>2 &nbsp;·&nbsp; API — Application Programming Interface</dt>
+    <dd>
+      A way for one piece of software to ask another piece of software a question.
+      When ORCA needs a wave height, it calls an API belonging to a weather service —
+      like phoning a specific department and getting a structured answer back rather
+      than a conversation. ORCA also <em>offers</em> an API, so other software could
+      use it.
+    </dd>
+
+    <dt>3 &nbsp;·&nbsp; Hs — Significant Wave Height</dt>
+    <dd>
+      The standard measure of how rough the sea is. Roughly the average height of the
+      biggest third of the waves, measured from trough to crest, in metres. It is not
+      the biggest wave — individual waves can be nearly twice Hs. This is the single
+      most important number in the whole system.
+    </dd>
+
+    <dt>4 &nbsp;·&nbsp; Knot (kn)</dt>
+    <dd>
+      One nautical mile per hour — about 1.85 km/h. The standard unit for wind and
+      boat speed at sea. 22 knots is roughly 41 km/h. Worth knowing because confusing
+      knots with kilometres is a mistake ORCA actively guards against, having been
+      bitten by it.
+    </dd>
+
+    <dt>5 &nbsp;·&nbsp; CAPE — Convective Available Potential Energy</dt>
+    <dd>
+      A measure, in joules per kilogram, of how much energy the atmosphere has
+      available to build thunderstorms. High CAPE means thunderstorms are
+      <em>possible</em>, not that one is happening. India has no free authoritative
+      real-time lightning feed, so ORCA uses CAPE as an honest stand-in and says so.
+    </dd>
+
+    <dt>6 &nbsp;·&nbsp; SST — Sea Surface Temperature</dt>
+    <dd>
+      How warm the top layer of the ocean is. It matters for fishing: fish gather
+      where warm and cool water meet, because that boundary concentrates the plankton
+      they feed on.
+    </dd>
+
+    <dt>7 &nbsp;·&nbsp; PFZ — Potential Fishing Zone</dt>
+    <dd>
+      An advisory saying "fish are likely here". India's oceanographic institute
+      publishes these daily as picture maps. Because picture maps cannot be read by
+      software, ORCA re-computes the same thing from the same underlying satellite
+      measurements.
+    </dd>
+
+    <dt>8 &nbsp;·&nbsp; INCOIS · IMD · MOSDAC · NDMA</dt>
+    <dd>
+      The four Indian government bodies that matter here.
+      <b>INCOIS</b> = Indian National Centre for Ocean Information Services (ocean
+      data and fishing advisories).
+      <b>IMD</b> = India Meteorological Department (weather warnings).
+      <b>MOSDAC</b> = Meteorological and Oceanographic Satellite Data Archival Centre
+      (ISRO's satellite data).
+      <b>NDMA</b> = National Disaster Management Authority (runs SACHET, the national
+      alert system).
+      ORCA is designed to <em>supplement</em> these, never to replace them.
+    </dd>
+
+    <dt>9 &nbsp;·&nbsp; LLM — Large Language Model</dt>
+    <dd>
+      The kind of artificial intelligence behind tools like ChatGPT. It is very good
+      at understanding a question and writing a fluent answer. It is <em>not</em>
+      reliable at arithmetic or at following a rule exactly every time. That single
+      fact shapes ORCA's entire design — see Part 3.
+    </dd>
+
+    <dt>10 &nbsp;·&nbsp; Agent</dt>
+    <dd>
+      An LLM that has been given tools and permission to use them in a sequence it
+      chooses. Instead of just answering from memory, it can decide "I need the wave
+      height, then I need to check the safety rules, then I can answer." ORCA has one
+      agent with eight tools.
+    </dd>
+
+    <dt>11 &nbsp;·&nbsp; Deterministic</dt>
+    <dd>
+      Given the same inputs, always produces exactly the same output, and you can
+      trace precisely why. The opposite of an LLM, which may phrase the same answer
+      three different ways. ORCA's safety verdict is deterministic, on purpose.
+    </dd>
+
+    <dt>12 &nbsp;·&nbsp; Provenance</dt>
+    <dd>
+      The origin story of a number. Not just "29.1 °C" but "29.1 °C, from NASA's
+      satellite product, measured 4 hours ago, obtained live". ORCA attaches this to
+      every value it handles and refuses to carry values that lack it.
+    </dd>
+
+    <dt>13 &nbsp;·&nbsp; Staleness</dt>
+    <dd>
+      Whether a number is too old to be trusted <em>for what it is</em>. Six hours is
+      fine for a sea temperature and useless for a thunderstorm forecast, so ORCA
+      keeps a different expiry time for every kind of measurement.
+    </dd>
+
+    <dt>14 &nbsp;·&nbsp; Frontend and Backend</dt>
+    <dd>
+      The <b>frontend</b> is what you see and touch — the map, the panels, the
+      microphone button. It runs in your web browser. The <b>backend</b> is the part
+      that does the work — fetching data, running the science, computing the verdict.
+      It runs on a server. They talk to each other over the internet using an API.
+    </dd>
+
+    <dt>15 &nbsp;·&nbsp; Streaming (and SSE — Server-Sent Events)</dt>
+    <dd>
+      Normally software asks a question and waits for the whole answer. Streaming
+      means the answer arrives in pieces as it is produced. ORCA streams its
+      reasoning, so you watch it work rather than staring at a spinner. SSE is the
+      specific web technique used. This matters for trust: a step-by-step trace that
+      arrives all at once at the end is indistinguishable from one that was made up.
+    </dd>
+  </dl>
+  </div>
+</section>
+
+<!-- ============================================================ PART 3 -->
+<section class="part">
+  <div class="part-no">Part 3</div>
+  <h2>The one big idea</h2>
+
+  <p class="lead">
+    If you read only one part of this document, read this one. Every design decision
+    in ORCA follows from a single problem, and understanding the problem makes the
+    rest of the system obvious.
+  </p>
+
+  <h3>The problem: language models are fluent and unreliable</h3>
+  <p>
+    A large language model is genuinely remarkable at understanding a badly-phrased
+    question in Tamil and producing a clear, kind, well-organised answer. That is a
+    hard problem and it solves it well.
+  </p>
+  <p>
+    It is also capable of confidently writing "conditions look fine" when the wave
+    height is over the limit. Not because it is broken — because it is a system that
+    predicts plausible text, and "conditions look fine" is extremely plausible text.
+    It has no mechanism that <em>forces</em> it to compare 2.6 against 1.5 and act on
+    the result.
+  </p>
+
+  <div class="box stop">
+    <div class="box-title">The failure this system exists to prevent</div>
+    <p>
+      A fisherman asks, in Tamil, whether it is safe. The waves are 2.6 metres and his
+      boat's published limit is 1.5 metres. A language model answers, fluently and
+      warmly, that conditions are manageable if he is careful. He goes out. That is
+      not a software bug. That is a death.
+    </p>
+  </div>
+
+  <h3>The solution: split the system in two, and put a wall between them</h3>
+  <p>
+    ORCA separates <em>deciding</em> from <em>explaining</em>, and gives them to two
+    completely different kinds of software.
+  </p>
+
+  <table>
+    <thead><tr><th style="width:38mm"></th><th>The rule engine</th><th>The language model</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>What it does</b></td>
+        <td>Decides GO / CAUTION / NO-GO / UNVERIFIABLE</td>
+        <td>Explains the decision in the user's language</td>
+      </tr>
+      <tr>
+        <td><b>How it works</b></td>
+        <td>Fixed arithmetic against published limits. Same input, same output, every time.</td>
+        <td>Predicts fluent text. Same input, different phrasing each time.</td>
+      </tr>
+      <tr>
+        <td><b>Can it be wrong?</b></td>
+        <td>Only if the published limits are wrong — and those are cited, versioned, and swappable.</td>
+        <td>Yes, in wording. It is not allowed anywhere near the decision.</td>
+      </tr>
+      <tr>
+        <td><b>Is it allowed to change the verdict?</b></td>
+        <td>It <em>is</em> the verdict.</td>
+        <td><b>No.</b> This is enforced in four separate ways.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>How the wall is enforced — four independent mechanisms</h3>
+  <p>
+    Saying "the model must not change the verdict" in an instruction is not
+    enforcement, it is a request. ORCA enforces it four times over, so that three of
+    the four can fail and the rule still holds.
+  </p>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div>
+      <div>
+        <h5>The type system makes the wrong answer unrepresentable</h5>
+        <p>
+          Every verdict carries a field recording who decided it. That field is
+          declared as being able to hold exactly one value: <code>"rule_engine"</code>.
+          Not "usually rule_engine" — <em>only</em>. There is no way to write
+          <code>"llm"</code> into it, because the program would refuse to run.
+        </p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">2</div>
+      <div>
+        <h5>An automated test forbids the wiring from existing</h5>
+        <p>
+          The rule engine lives in a folder called <code>services/</code>. The AI lives
+          in a folder called <code>agents/</code>. A test checks, every single time
+          anyone changes the code, that nothing in <code>services/</code> so much as
+          <em>mentions</em> <code>agents/</code>. The deterministic core physically
+          cannot acquire a dependency on the AI, even by accident.
+        </p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">3</div>
+      <div>
+        <h5>A critic reviews the model's draft before you see it</h5>
+        <p>
+          After the language model writes its answer, a separate checking step compares
+          it against the rule engine's verdict. If the draft softens a NO-GO, or quotes
+          a figure that does not appear in the fetched data, the draft is
+          <b>rejected</b> and rewritten. The interface shows you when this happened and
+          how many attempts it took — a rejection is displayed, not hidden.
+        </p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">4</div>
+      <div>
+        <h5>The interface says so, on screen, every time</h5>
+        <p>
+          The verdict card carries the line "Decided by a deterministic rule engine —
+          no language model", along with the version of the limits table used. The
+          claim is auditable by the person relying on it.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <h3>The second half of the idea: no number without its origin</h3>
+  <p>
+    The other thing that makes advice trustworthy is being able to check it. So ORCA
+    has a rule that applies to every value in the entire system: a number may not
+    travel through the software as a bare number. It must be wrapped in a record
+    stating where it came from.
+  </p>
+
+  <div class="box plain">
+    <div class="box-title">What every value looks like inside ORCA</div>
+    <table class="tight" style="margin:0">
+      <tbody>
+        <tr><td style="width:34mm"><b>value</b></td><td>29.1</td></tr>
+        <tr><td><b>unit</b></td><td>degrees Celsius</td></tr>
+        <tr><td><b>variable</b></td><td>sea surface temperature</td></tr>
+        <tr><td><b>dataset</b></td><td>which specific product it came from</td></tr>
+        <tr><td><b>provider</b></td><td>which organisation published it</td></tr>
+        <tr><td><b>provenance</b></td><td>one of six states — see below</td></tr>
+        <tr><td><b>freshness</b></td><td>when it was valid, how old that makes it, and whether that is too old <em>for this kind of measurement</em></td></tr>
+        <tr><td><b>lineage</b></td><td>if it was calculated, which inputs it was calculated from</td></tr>
+        <tr><td><b>citations</b></td><td>the published source, with a link</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>The six provenance states, and why six</h4>
+  <p>
+    "Where did this come from" has more than two useful answers. Collapsing them to
+    "we have data" and "we don't" throws away exactly the distinctions a person needs
+    to judge risk.
+  </p>
+
+  <table>
+    <thead><tr><th style="width:26mm">State</th><th>Means</th><th style="width:52mm">Why it is separate</th></tr></thead>
+    <tbody>
+      <tr><td><b>LIVE</b></td><td>Fetched from the source just now</td><td>The best case. Nothing to qualify.</td></tr>
+      <tr><td><b>CACHED</b></td><td>Fetched earlier, reused</td><td>Might be stale. The user should see the age, not just the value.</td></tr>
+      <tr><td><b>CURATED</b></td><td>Reference information we hold ourselves — treaty lines, boat limits</td><td>Does not go stale the way a forecast does. A 2024 maritime boundary is still correct.</td></tr>
+      <tr><td><b>DERIVED</b></td><td>Calculated by ORCA from other values</td><td>Must declare its inputs, or the calculation is unauditable magic. ORCA <em>refuses to construct</em> a derived value that does not name its sources.</td></tr>
+      <tr><td><b>SIMULATED</b></td><td>Demonstration data, not real</td><td>Displayed with a hatched pattern, and <b>excluded from safety decisions entirely</b>. A go / no-go can never rest on invented data.</td></tr>
+      <tr><td><b>UNAVAILABLE</b></td><td>We tried and could not get it</td><td>The most important one. This is what stops a gap in the data reading as good news.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box good">
+    <div class="box-title">The consequence worth stating</div>
+    <p>
+      Because <b>UNAVAILABLE</b> is a real state rather than an absence, ORCA has a
+      fourth verdict alongside GO, CAUTION and NO-GO: <b>UNVERIFIABLE</b>. It appears
+      with the words "ORCA could not obtain enough data to judge — this is not the same
+      as safe", and it lists which specific inputs were missing. Most systems do not
+      have this verdict. It is the one we are proudest of.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ PART 4 -->
+<section class="part">
+  <div class="part-no">Part 4</div>
+  <h2>The architecture, layer by layer</h2>
+
+  <p class="lead">
+    ORCA is nine layers. Data enters at the bottom, and a spoken answer leaves at the
+    top. Each layer only talks to its neighbours, which is what makes any one of them
+    replaceable without rewriting the rest.
+  </p>
+
+  <div class="stack">
+    <div class="layer"><div class="n">9 · Presentation</div><div class="d">The map, panels, 3D views, voice controls. Runs in the browser.</div></div>
+    <div class="arrow">▲ ▼</div>
+    <div class="layer"><div class="n">8 · HTTP interface</div><div class="d">47 endpoints. The only way in or out of the backend.</div></div>
+    <div class="arrow">▲ ▼</div>
+    <div class="layer"><div class="n">7 · Language plane</div><div class="d">Detect language, translate, verify the numbers survived, speak, listen.</div></div>
+    <div class="arrow">▲ ▼</div>
+    <div class="layer"><div class="n">6 · Agent plane</div><div class="d">Understands the question, picks tools, writes the answer, criticises it.</div></div>
+    <div class="arrow">▲ ▼</div>
+    <div class="layer core"><div class="n">5 · Deterministic core</div><div class="d"><b>The verdict lives here.</b> Risk engine, boundaries, routing, drift, alerts. Imports nothing from the agent plane — enforced by a test.</div></div>
+    <div class="arrow">▲ ▼</div>
+    <div class="layer"><div class="n">4 · Science</div><div class="d">Pure maths on grids: fronts, fishing zones, colour maps, vector fields.</div></div>
+    <div class="arrow">▲ ▼</div>
+    <div class="layer"><div class="n">3 · Source adapters</div><div class="d">One module per external data source. Each returns values already wrapped in provenance.</div></div>
+    <div class="arrow">▲ ▼</div>
+    <div class="layer"><div class="n">2 · Provenance contract</div><div class="d">The rule every layer obeys. Not a layer you pass through — a law that applies everywhere.</div></div>
+    <div class="arrow">▲ ▼</div>
+    <div class="layer"><div class="n">1 · External sources</div><div class="d">Weather services, ocean institutes, satellite archives, boundary databases.</div></div>
+  </div>
+
+  <hr class="rule">
+
+  <h3>Layer 1 — Where the data actually comes from</h3>
+  <p>
+    ORCA owns no sensors. Everything it knows, it asks somebody else for. Which means
+    a large part of the engineering is about behaving well as a guest on other
+    people's systems, and being honest when they are unavailable.
+  </p>
+
+  <table>
+    <thead><tr><th style="width:36mm">Source</th><th style="width:20mm">Status</th><th>What we get, and the catch</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Open-Meteo</b><br><span style="font-size:8pt;color:#6b7480">Marine and Forecast APIs</span></td>
+        <td><span class="pill built">Built</span></td>
+        <td>
+          The workhorse. Wave height, wave period, wave direction, swell, sea
+          temperature, surface currents, wind speed and direction, gusts, visibility,
+          rainfall, CAPE and CIN. Free, fast, no key required.
+          <br><em>The catch:</em> the free tier is metered per <em>location</em>, not
+          per request — so asking about 300 points costs 300 of your allowance, not 1.
+          ORCA meters itself against that on its own side rather than discovering the
+          limit by being refused.
+        </td>
+      </tr>
+      <tr>
+        <td><b>INCOIS ERDDAP</b><br><span style="font-size:8pt;color:#6b7480">Indian ocean data server</span></td>
+        <td><span class="pill built">Built</span></td>
+        <td>
+          Indian sea-surface temperature and related ocean products.
+          <br><em>The catch:</em> their security certificate chain is incomplete, so
+          standard software refuses to connect. The lazy fix is to switch off
+          certificate checking. ORCA instead ships the one missing intermediate
+          certificate and completes the chain properly — encryption stays verified.
+        </td>
+      </tr>
+      <tr>
+        <td><b>NASA GIBS</b><br><span style="font-size:8pt;color:#6b7480">Global Imagery Browse Services</span></td>
+        <td><span class="pill built">Built</span></td>
+        <td>
+          The Blue Marble Earth imagery and night-time city lights used for the opening
+          globe. Fetched once and stored, so the globe still appears on a venue's
+          collapsing Wi-Fi.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Marine Regions</b><br><span style="font-size:8pt;color:#6b7480">Maritime boundary database</span></td>
+        <td><span class="pill built">Built</span></td>
+        <td>
+          The official geometry of the Indian EEZ and the treaty lines with Sri Lanka,
+          Bangladesh, Myanmar, Maldives, Indonesia and Thailand.
+          <br><em>The catch:</em> treaty-line records sometimes have no identifier at
+          all, so removing duplicates by identifier silently deleted six of seven
+          boundaries. Identity is now composite.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Groq · Google Gemini · OpenRouter · Ollama</b></td>
+        <td><span class="pill built">Built</span></td>
+        <td>
+          Four language-model providers, tried in order. If all four fail, ORCA falls
+          back to writing the answer from a fixed template — less fluent, equally
+          correct, and it still cites everything.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Sarvam AI</b></td>
+        <td><span class="pill built">Built</span></td>
+        <td>
+          Indian-language translation, speech recognition and speech synthesis.
+          <br><em>The catch:</em> covered at length in Part 6 — it is fluent, and
+          fluency is exactly what makes its mistakes dangerous.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Copernicus Marine · NASA Earthdata · Sentinel Hub · AISStream · Global Fishing Watch</b></td>
+        <td><span class="pill later">Later</span></td>
+        <td>
+          Credentials are configured and load correctly, and the system reports them as
+          available capabilities. <b>The adapters that would use them are not written.</b>
+          Nothing in ORCA calls them today. We state this plainly rather than counting
+          them as integrations.
+        </td>
+      </tr>
+      <tr>
+        <td><b>IMD · MOSDAC · Bhashini</b></td>
+        <td><span class="pill later">Later</span></td>
+        <td>
+          Reported by the system as <em>dormant</em> — the code path exists, the
+          credentials do not. IMD needs an API key and our server's address
+          whitelisted; MOSDAC needs an ISRO registration; Bhashini is the Government of
+          India's own language platform and would make a good sovereign fallback behind
+          Sarvam.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Layer 2 — The provenance contract</h3>
+  <p>
+    Described fully in Part 3. It is listed as a layer because it is not a piece of
+    code you call — it is a shape that every value in the system is required to have,
+    checked automatically at the moment each value is created. A value that fails the
+    check does not get created; the program raises an error instead of quietly
+    carrying an unattributed number.
+  </p>
+  <p>Two of those automatic checks are worth naming:</p>
+  <ul>
+    <li>
+      A <b>DERIVED</b> value with no declared inputs is rejected at construction. This
+      is why the fishing-zone layer cannot be magic — it is structurally obliged to
+      name what it was computed from.
+    </li>
+    <li>
+      An <b>UNAVAILABLE</b> value that nonetheless carries a number is rejected. "We
+      could not get it" and "here is the figure" are contradictory, and the type
+      refuses to hold both.
+    </li>
+  </ul>
+
+  <h3>Layer 3 — Source adapters</h3>
+  <p>
+    One module per external source, all sitting on a shared client that handles the
+    unglamorous realities of talking to other people's servers:
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:40mm">Behaviour</th><th>Why it is there</th></tr></thead>
+    <tbody>
+      <tr><td><b>Retries with backoff</b></td><td>A network hiccup should not become a user-facing failure. Waits progressively longer between attempts rather than hammering a struggling server.</td></tr>
+      <tr><td><b>Circuit breaker</b></td><td>After repeated failures, stop trying for a while. Continuing to call a dead service wastes the user's time and is rude to the operator.</td></tr>
+      <tr><td><b>Conditional fetching (ETag)</b></td><td>Ask "has this changed since I last looked?" If not, the server replies with a tiny "no" instead of resending everything.</td></tr>
+      <tr><td><b>Health reporting</b></td><td>Every success and failure is recorded, which is what the "sources 6/7" indicator in the interface is reading. It is a measurement, not a decoration.</td></tr>
+      <tr><td><b>Failures do not raise</b></td><td>A source being down returns a result marked as failed, rather than crashing the request. One dead source must not take down the answer.</td></tr>
+      <tr><td><b>Units read, never assumed</b></td><td>Covered in Part 6. This one caused the worst bug in the project's history.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Layer 4 — Science</h3>
+  <p>
+    Pure calculation. No network, no database, no AI — which means every function here
+    can be tested by giving it numbers and checking the numbers that come out.
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:40mm">Module</th><th>What it computes</th></tr></thead>
+    <tbody>
+      <tr><td><b>Grid</b></td><td>One fixed grid for the whole system: 60°E–100°E, 0°N–25°N at 0.05° spacing — 800 × 500 = 400,000 cells, each about 5.5 km across. Everything is resampled onto it so layers can be compared cell by cell.</td></tr>
+      <tr><td><b>Fronts</b></td><td>Finds boundaries between warm and cool water — the places fish gather. Three different detection methods, and the interface says which one produced the layer you are looking at.</td></tr>
+      <tr><td><b>Potential Fishing Zones</b></td><td>Combines temperature, temperature gradients and chlorophyll into ranked zones, and reports which criteria it could not apply.</td></tr>
+      <tr><td><b>Colour maps</b></td><td>Turns numbers into pictures. Seven scientific colour scales. Crucially, the legend shown to the user is generated from the <em>same</em> lookup table that coloured the pixels, so the legend cannot disagree with the image.</td></tr>
+      <tr><td><b>Vector fields</b></td><td>Handles wind and current as directional arrows, and contains the single most dangerous convention in marine data — see Part 6.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Layer 5 — The deterministic core</h3>
+  <p>
+    The most important layer. Everything here is fixed arithmetic and geometry, with
+    no AI anywhere near it.
+  </p>
+
+  <h4>The risk engine</h4>
+  <p>Four measurements, weighted into one index out of 100:</p>
+  <table class="tight">
+    <thead><tr><th style="width:44mm">Measurement</th><th style="width:22mm">Weight</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Wave height</td><td>35%</td><td>The dominant factor for a small boat.</td></tr>
+      <tr><td>Wind speed</td><td>30%</td><td>Drives both waves and handling difficulty.</td></tr>
+      <tr><td>Lightning probability</td><td>20%</td><td>Derived from CAPE, and labelled as such.</td></tr>
+      <tr><td>Visibility</td><td>15%</td><td>Matters most for collision and for finding your way home.</td></tr>
+    </tbody>
+  </table>
+
+  <p>
+    Then — and this is the part that matters — <b>hard vetoes are checked
+    separately</b>. If wave height is at or over your boat class's limit, or lightning
+    probability is at or over 60%, the verdict is NO-GO <em>regardless of the
+    index</em>.
+  </p>
+
+  <div class="box caution">
+    <div class="box-title">Why a veto is not just a heavy weight</div>
+    <p>
+      If exceeding the wave limit were merely a large penalty, then a calm wind, clear
+      visibility and no lightning could out-vote it and produce a GO in a sea that
+      would sink the boat. Weighted averages have no concept of "never". So "never" is
+      built as a separate mechanism that runs after the average and overrides it. The
+      same reasoning appears again in the router, where a forbidden patch of sea is
+      made <em>impassable</em> rather than <em>expensive</em>.
+    </p>
+  </div>
+
+  <h4>The five Indian boat classes</h4>
+  <p>
+    This is what makes the answer personal rather than generic. Set your boat's length
+    and the limits change.
+  </p>
+  <table class="tight">
+    <thead><tr><th style="width:50mm">Class</th><th style="width:16mm">Max Hs</th><th style="width:20mm">Max wind</th><th>Min visibility</th></tr></thead>
+    <tbody>
+      <tr><td>Traditional non-motorised (kattumaram, canoe)</td><td>1.0 m</td><td>15 kn</td><td>2.0 km</td></tr>
+      <tr><td>Motorised fibreglass boat, 7–10 m</td><td>1.5 m</td><td>22 kn</td><td>2.0 km</td></tr>
+      <tr><td>Small mechanised gillnetter / trawler, 10–15 m</td><td>2.0 m</td><td>28 kn</td><td>1.0 km</td></tr>
+      <tr><td>Mechanised trawler, 15–24 m</td><td>2.5 m</td><td>33 kn</td><td>1.0 km</td></tr>
+      <tr><td>Deep-sea vessel, over 24 m</td><td>3.5 m</td><td>40 kn</td><td>0.5 km</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The table carries a version stamp — currently <code>orca-thresholds-2026.08</code>
+    — which is displayed on every verdict. If a fisheries authority disagrees with a
+    number, they can point at exactly which version produced the advice, and replacing
+    it is a configuration change rather than a code change.
+  </p>
+
+  <div class="box caution">
+    <div class="box-title">An honest limitation, stated up front</div>
+    <p>
+      INCOIS does not publish its own small-craft warning thresholds. Ours are seeded
+      from peer-reviewed small-craft literature, cited row by row, and explicitly
+      versioned so they can be replaced by official values the moment those are
+      available. We are not claiming these are the official Indian numbers. We are
+      claiming they are defensible, visible, and swappable.
+    </p>
+  </div>
+
+  <h4>Geofencing — knowing when you are about to cross a border</h4>
+  <p>
+    Crossing a maritime boundary can mean arrest and boat confiscation. The Palk Bay
+    line between India and Sri Lanka is close enough to fishing grounds that this is a
+    routine hazard, not an exotic one.
+  </p>
+  <p>
+    ORCA holds the boundary geometry and answers: how far away, in which direction,
+    and — given your heading and speed — <em>how many minutes until you cross</em>. It
+    reports on <b>transitions</b>: the moment you move from "clear" to "approaching",
+    or "approaching" to "crossed". Not a constant readout, which people stop noticing.
+  </p>
+  <p>
+    Two engineering details worth mentioning because both were mistakes we made and
+    fixed:
+  </p>
+  <ul>
+    <li>
+      Checking a position against every boundary shape is slow. ORCA uses a spatial
+      index — a structure that first narrows the search to nearby candidates with a
+      cheap test, then does the exact geometry on just those. Roughly the difference
+      between reading a whole index and reading a whole book.
+    </li>
+    <li>
+      Distances use proper geodesic calculation on the Earth's actual ellipsoid shape,
+      verified against an independent implementation to within one millimetre on a
+      known pair of points. Treating latitude and longitude as flat coordinates is
+      wrong by kilometres at this scale, and "kilometres" is the difference between
+      inside and outside a national boundary.
+    </li>
+  </ul>
+
+  <h4>Safe-passage routing</h4>
+  <p>
+    Give ORCA a destination and it plans a route. Explained in full in Part 5, but the
+    architectural point is this: <b>the router contains no safety thresholds of its
+    own.</b> It asks the same risk engine that produces the on-screen verdict about
+    every patch of sea it considers. There is exactly one definition of "unsafe" in
+    the system.
+  </p>
+
+  <h4>Search-and-rescue drift</h4>
+  <p>
+    If a person or boat goes missing, ORCA calculates where the sea will have carried
+    them. It returns a <em>search area</em> and refuses to return a position — the
+    reasoning is in Part 5.
+  </p>
+
+  <h4>CAP advisory generation</h4>
+  <p>
+    CAP stands for <b>Common Alerting Protocol</b> — an international standard
+    (published by a body called OASIS) for machine-readable emergency alerts. India's
+    NDMA SACHET system and the IMD already publish in it.
+  </p>
+  <p>
+    ORCA can export any advisory as valid CAP 1.2, with a second block in the local
+    language. This is the "designed to fit in" feature: rather than asking existing
+    Indian alerting infrastructure to adopt a new format, ORCA speaks the format they
+    already use.
+  </p>
+
+  <h4>The trip monitor</h4>
+  <p>
+    The only part of ORCA that speaks without being asked. It re-checks watched
+    positions every two minutes and raises an alert when something crosses a line.
+    Design and reasoning in Part 5.
+  </p>
+
+  <h3>Layer 6 — The agent plane</h3>
+  <p>
+    This is where the language model lives, fenced off from the decision. It is built
+    on a framework called <b>LangGraph</b>, which lets you describe an AI workflow as a
+    graph of steps with explicit paths between them, rather than as one large
+    instruction and a hope.
+  </p>
+
+  <p>The stages, in order:</p>
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div>
+      <div>
+        <h5>Interaction — work out what was actually asked</h5>
+        <p>
+          Detects the language, and decomposes compound questions. "Is it safe
+          tomorrow, and where will I find fish?" becomes two labelled sub-questions,
+          and the tools those labels require become a <b>floor</b> the next stage may
+          add to but not drop from.
+        </p>
+        <p>
+          This exists because of an observed failure: asked both halves, the planner
+          would answer the first and silently ignore the second. Making the tool set a
+          floor rather than a suggestion fixed it. There is a keyword-based fallback
+          that works with no AI at all, including for romanised Indian text like
+          "pogum vazhi enna".
+        </p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">2</div>
+      <div>
+        <h5>Planning — choose the smallest set of tools that answers it</h5>
+        <p>
+          ORCA has eight tools. Each publishes a machine-readable description of itself:
+          what kinds of question it answers, its resolution, its typical speed, what
+          provenance its results carry, and how expensive it is to run.
+        </p>
+        <p>
+          The planner reads those descriptions and picks. Selecting everything is
+          treated as a wrong answer: it wastes time and demonstrates no judgement.
+          <b>The plan is published to the interface before anything runs</b>, which is
+          what makes the trace verifiable rather than a summary written afterwards.
+        </p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">3</div>
+      <div>
+        <h5>Execution — run the tools, in a safe order</h5>
+        <p>
+          The order is a real constraint, not a preference: the tool that assesses risk
+          needs the tool that fetches conditions to have run first. That ordering is
+          defined in exactly one place in the codebase — after a bug where two copies
+          had drifted apart, and a newly-added tool was present in one and missing from
+          the other, so it worked when tested alone and was silently dropped from every
+          compound question.
+        </p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">4</div>
+      <div>
+        <h5>Reporting — write the answer</h5>
+        <p>
+          The language model receives the tool results, the rule engine's verdict marked
+          as authoritative and unchangeable, and — for compound questions — the numbered
+          list of parts it must address. It is instructed, in three different phrasings,
+          that it may explain a verdict and never issue or soften one.
+        </p>
+      </div>
+    </div>
+    <div class="flow-step">
+      <div class="flow-num">5</div>
+      <div>
+        <h5>Criticism — check the draft, and send it back if needed</h5>
+        <p>
+          The critic checks that the verdict is stated plainly, that no softening
+          language contradicts a NO-GO, and that every figure quoted actually appears in
+          the fetched data. A rejected draft is regenerated with the reason attached,
+          and the interface shows the round count.
+        </p>
+        <p>
+          The critic itself had a revealing bug: it compared numbers as text, so a
+          correct draft quoting "72.7" was rejected three times for not containing
+          "73". It now compares numerically with a tolerance, and eighteen tests pin
+          the behaviour in both directions — it must catch a genuine fabrication and it
+          must not reject a correct rounding.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <h4>The eight tools</h4>
+  <table class="tight">
+    <thead><tr><th style="width:48mm">Tool</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>fetch_marine_conditions</code></td><td>Current sea and weather at a point.</td></tr>
+      <tr><td><code>fetch_forecast_window</code></td><td>How conditions change over the next few days.</td></tr>
+      <tr><td><code>fetch_satellite_sst</code></td><td>Satellite sea-surface temperature.</td></tr>
+      <tr><td><code>assess_risk</code></td><td>Calls the rule engine. The only source of a verdict.</td></tr>
+      <tr><td><code>lookup_boat_thresholds</code></td><td>The limits for a vessel class, with citations.</td></tr>
+      <tr><td><code>find_fishing_zones</code></td><td>Nearest fishing zones, with distance, bearing and rank.</td></tr>
+      <tr><td><code>plan_route</code></td><td>A safe passage, or the reason there is not one.</td></tr>
+      <tr><td><code>discover_datasets</code></td><td>What data ORCA can read and how current each source is. Lets a user interrogate the system's own honesty.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Layer 7 — The language plane</h3>
+  <p>
+    Eleven languages: English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam,
+    Marathi, Gujarati, Odia and Konkani. Four capabilities: detect, translate, speak,
+    listen. And one component that matters more than the other four combined — the
+    number-integrity guard, which gets its own section in Part 6 because it is the
+    single most interesting piece of engineering in the project.
+  </p>
+
+  <table class="tight">
+    <thead><tr><th style="width:34mm">Capability</th><th>How it works</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Detection</b></td>
+        <td>Identifies the language from the script, and handles romanised Indian text — someone typing Tamil in Latin letters on an English keyboard, which is extremely common.</td>
+      </tr>
+      <tr>
+        <td><b>Translation</b></td>
+        <td>Sarvam first, Google Gemini as fallback. Every result passes the guard before anyone sees it.</td>
+      </tr>
+      <tr>
+        <td><b>Speech synthesis</b></td>
+        <td>Sarvam's Bulbul model. All eleven voices were verified by actually generating audio rather than by trusting the documentation — which is how we found that Odia's documented voice is rejected by the live service, and that Konkani has no native voice at all. ORCA marks the Konkani voice as a substitute rather than passing a Marathi voice off as Konkani.</td>
+      </tr>
+      <tr>
+        <td><b>Speech recognition</b></td>
+        <td>Two engines, chosen per language on measured evidence. On the same Tamil recording, Sarvam's Saarika transcribed it exactly including the numbers, while OpenAI's Whisper garbled them. So Indian languages go to Sarvam and English goes to Whisper — a decision from a measurement, not a preference.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="box plain">
+    <div class="box-title">A small detail with a real reason</div>
+    <p>
+      Web browsers record audio in a format called WebM/Opus. Sarvam's recognition
+      service rejects it with an error that looks like an authentication failure. Rather
+      than relabelling the file and hoping, ORCA converts the recording to 16 kHz mono
+      WAV inside the browser — the format both engines are trained on — using the
+      browser's own audio decoder. Anything richer is upload bandwidth the model
+      discards, and on a harbour phone connection the upload is the slow part.
+    </p>
+  </div>
+
+  <h3>Layer 8 — The HTTP interface</h3>
+  <p>
+    47 endpoints. Two deserve comment because they behave unusually on purpose.
+  </p>
+  <ul>
+    <li>
+      <b>The agent stream</b> sends its reasoning in pieces as it happens, with
+      instructions to intermediate network equipment not to buffer it, no compression
+      on that path, and a periodic heartbeat so an idle connection is not cut while
+      waiting for a slow data source. All three exist because a trace that arrives in
+      one lump at the end proves nothing.
+    </li>
+    <li>
+      <b>The route planner returns "success" for a refusal.</b> "There is no safe
+      passage for an 8-metre boat across this corridor today, and here are the six
+      patches of sea that block it" is a correct and complete answer to the question
+      asked. Returning it as an error would put it in the same category as a malformed
+      request and encourage software to retry it.
+    </li>
+  </ul>
+
+  <h3>Layer 9 — The presentation layer</h3>
+  <p>
+    A web application. The map is a globe — a real spherical projection, not a flat
+    rectangle — with data layers drawn on top of it by a high-performance graphics
+    library that talks directly to the computer's graphics hardware.
+  </p>
+
+  <table class="tight">
+    <thead><tr><th style="width:44mm">Surface</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td><b>Verdict card</b></td><td>The answer, the index, the vetoes, what would change it, and the statement that no language model was involved.</td></tr>
+      <tr><td><b>Evidence panel</b></td><td>Every number with its source, age and provenance badge. The receipt for the verdict.</td></tr>
+      <tr><td><b>Freshness strip</b></td><td>Which sources are up, which drivers are running, how many capabilities are dormant. A health readout, not a green tick.</td></tr>
+      <tr><td><b>Chat and trace</b></td><td>The conversation, and the agent's reasoning arriving step by step with measured timings.</td></tr>
+      <tr><td><b>Layer rail</b></td><td>Data layers with provenance badges and legends generated from the same tables that coloured the pixels.</td></tr>
+      <tr><td><b>Voice bar</b></td><td>Press-to-talk with a level meter driven by the real microphone signal, language selector, and playback.</td></tr>
+      <tr><td><b>Sea view</b></td><td>A 3D ocean surface built from the actual forecast. Part 6.</td></tr>
+      <tr><td><b>Route, SAR and alert panels</b></td><td>Passage planning, drift search areas, and proactive alerts.</td></tr>
+      <tr><td><b>Treatment rail</b></td><td>Seven visual styles, and a frame-rate guard that turns one off when the computer cannot keep up.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box good">
+    <div class="box-title">One frontend decision that shows the whole philosophy</div>
+    <p>
+      The visual treatments recolour the map. But ORCA's data layers mean something — a
+      particular shade on the temperature layer corresponds to a particular temperature
+      through a published lookup table, and the legend is generated from that same
+      table so it cannot lie.
+    </p>
+    <p style="margin-top:2mm">
+      A stylistic recolour breaks that. So whenever a treatment is active, the layer
+      rail <b>hides its legends</b> and says why. A legend that no longer matches the
+      pixels is not a cosmetic problem; it is a specific false claim about what a colour
+      means.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ PART 5 -->
+<section class="part">
+  <div class="part-no">Part 5</div>
+  <h2>Three journeys, end to end</h2>
+
+  <p class="lead">
+    The fastest way to understand a system is to follow one request all the way
+    through. Here are three, in increasing complexity.
+  </p>
+
+  <h3>Journey 1 — Tapping a point on the sea</h3>
+  <p>The simplest thing ORCA does, and it touches six layers.</p>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div><div>
+      <h5>You tap the map</h5>
+      <p>The browser converts your tap into a latitude and longitude and sends two requests to the backend: one for conditions, one for the verdict. They are sent together on purpose — if they were fetched separately they could disagree, and a verdict that disagrees with the evidence panel below it is worse than no verdict.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">2</div><div>
+      <h5>The backend asks two weather services at once</h5>
+      <p>Waves and currents come from a marine service; wind, visibility and thunderstorm energy come from an atmospheric one. Both are asked simultaneously rather than one after the other, because they do not depend on each other and the delay is visible to you.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">3</div><div>
+      <h5>Each value is wrapped in its provenance</h5>
+      <p>As each number arrives it is packaged with its source, its unit as declared by that source, when it was valid, and whether that makes it stale for its kind. A value the service could not supply becomes UNAVAILABLE rather than silently vanishing.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">4</div><div>
+      <h5>The rule engine decides</h5>
+      <p>Your boat length selects a class, the class supplies the limits, the four measurements are scored and weighted, the hard vetoes are checked separately, and one of four verdicts comes out — with the arithmetic recorded so the interface can show it.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">5</div><div>
+      <h5>Confidence is assessed separately from the verdict</h5>
+      <p>If a measurement was missing, it scores zero <em>and</em> forces low confidence. This matters enormously: "we could not measure the waves" and "the waves are calm" must never produce the same output. If confidence is too low, the verdict becomes UNVERIFIABLE with the missing inputs named.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">6</div><div>
+      <h5>You see the verdict, and the receipt</h5>
+      <p>The card, the vetoes, what would change the answer, and beneath it every number with its provenance badge — including whether it is a <em>forecast</em> for a time in the future rather than a stale measurement from the past. ORCA tracks that distinction because a value valid at 06:00 tomorrow is fourteen hours "old" by simple subtraction and perfectly current in fact.</p>
+    </div></div>
+  </div>
+
+  <h3>Journey 2 — Asking a compound question in Tamil, by voice</h3>
+  <p>
+    The full stack. Around fifteen seconds of work, all of it visible to you as it
+    happens.
+  </p>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div><div>
+      <h5>You hold the microphone button and speak</h5>
+      <p>A meter moves with your actual voice level — driven by the measured signal, not an animation, so a muted microphone visibly does nothing. Release, and the recording is converted in-browser to the format the recognition engines expect.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">2</div><div>
+      <h5>ORCA transcribes it and shows you what it heard</h5>
+      <p>It does <em>not</em> send it straight on. Speech recognition on a fisherman's question with a place name in it is the least reliable link in the chain, so you see the transcript and can correct it. ORCA also detects the language of the transcript and warns you if it does not match what you selected.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">3</div><div>
+      <h5>The question is split in two</h5>
+      <p>"Is it safe tomorrow?" and "where will I find fish?" are separated and labelled. The tools each label needs become a floor. You see this happen in the trace.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">4</div><div>
+      <h5>The plan appears, before anything runs</h5>
+      <p>Five tools, with the reason each was chosen. Then they execute one at a time and each result appears with the real time it took.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">5</div><div>
+      <h5>The rule engine returns the verdict, and the model writes the answer</h5>
+      <p>The verdict is handed to the model as unchangeable. The model writes English prose covering both halves of the question in the order asked.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">6</div><div>
+      <h5>The critic reviews it</h5>
+      <p>You see its ruling and how many attempts were needed.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">7</div><div>
+      <h5>Translation, sentence by sentence, with the numbers guarded</h5>
+      <p>The English answer appears immediately. The Tamil arrives a moment later as a separate delivery, so you are not kept waiting on the translation. Each sentence is translated and verified independently — and a sentence that cannot be verified <b>stays in English</b> rather than being translated unsafely. The panel reports "figures intact · 18" and, if any clause was held back, says so.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">8</div><div>
+      <h5>It speaks</h5>
+      <p>The spoken version is a <em>summary</em> — the verdict and the reason that drove it. The full compound answer synthesised to 66 seconds of Tamil, and nobody listens to 66 seconds of audio before launching a boat. The panel shows what was actually said, so a user who hears less than they read knows why. Whole lines are dropped, never half a figure.</p>
+    </div></div>
+  </div>
+
+  <h3>Journey 3 — Planning a safe passage</h3>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-num">1</div><div>
+      <h5>A corridor of sea is divided into a grid</h5>
+      <p>A rectangle covering start and destination plus a margin either side, divided into cells about 28 km across. The number of cells is capped — not arbitrarily, but calculated from how many questions ORCA is allowed to ask the weather service per minute.</p>
+      <p>That cap came from a real bug: an earlier fixed limit let one request spend its whole allowance fetching wave data, whereupon the wind request was refused — and the route came back <em>looking fine</em>, costed on wave height alone with wind, visibility and thunderstorm energy missing at every cell. It looked like a working router with a cautious opinion. Now the cap is derived from the budget, and a variable missing everywhere is reported rather than inferred.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">2</div><div>
+      <h5>Every cell is judged by the same rule engine</h5>
+      <p>Not a simplified copy — the identical function that produces the on-screen verdict. A cell with any hard veto is marked <b>impassable</b>, not expensive.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">3</div><div>
+      <h5>Land is identified by the wave model's own silence</h5>
+      <p>This is an idea worth pausing on. ORCA has no coastline database for this purpose. Instead: the marine forecast service returns nothing for wave height over land — so a cell with no wave height is a cell the wave model itself declines to answer for, which is exactly the set a boat must not cross.</p>
+      <p>It is more accurate than any coastline outline at this resolution, and it collapses "cannot route here" and "cannot measure here" into one state. That is the honest position: a patch of sea ORCA cannot measure is not a patch ORCA can clear.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">4</div><div>
+      <h5>A path-finding algorithm searches for the cheapest route</h5>
+      <p>The algorithm is <b>A*</b> ("A-star"), the standard method for finding a shortest path when you have a way to estimate remaining distance. Cost per cell is its physical distance multiplied by a penalty that grows with risk — squared, not linear, so a slightly worse cell is barely avoided and a nearly-forbidden one is avoided hard.</p>
+      <p>An automated test compares A*'s answer against an exhaustive search of the same grid. They must match exactly. So "this is the optimal route under the cost model" is verified rather than asserted.</p>
+    </div></div>
+    <div class="flow-step">
+      <div class="flow-num">5</div><div>
+      <h5>You get a route — or a reason</h5>
+      <p>A route comes with waypoints, distance, duration, and how much longer it is than a straight line. That last figure is the judgement the user has to make: 5% longer to avoid a 3-metre sea is worth taking; 180% longer means the honest answer was "not today".</p>
+      <p>If no route exists, ORCA names the specific cells that block it with the reason for each. "No route found" on its own is indistinguishable from a broken planner.</p>
+    </div></div>
+  </div>
+
+  <div class="box caution">
+    <div class="box-title">Something honest about routing during the monsoon</div>
+    <p>
+      When we tested this off Chennai in monsoon season, ORCA refused to route
+      <em>any</em> vessel class — because thunderstorm energy across the whole corridor
+      was above the veto threshold. That is defensible and it is also coarse. It is
+      discussed further in Part 8 under known limitations, and the demonstration script
+      tells the presenter to check the coast on the day and to <em>show the refusal</em>
+      rather than hide it.
+    </p>
+  </div>
+
+  <h3>Journey 3b — A search area for a missing person</h3>
+  <p>
+    Same layer, different problem, and the most consequential thing in the system.
+  </p>
+  <p>
+    ORCA models drift as the internationally standard sum of two things: the current
+    carrying the water, plus <b>leeway</b> — the object's own movement through the
+    water under wind. Leeway is not simply "3% of the wind speed downwind". Real
+    objects move both downwind <em>and sideways</em>, and which side they slip to flips
+    unpredictably between individual objects of the same type.
+  </p>
+  <p>
+    So ORCA runs 2,000 simulated particles. Each carries its own leeway coefficients
+    drawn from the measured spread for its object class, and its own sideways
+    direction. That scatter <em>is</em> the search area — a single set of average
+    coefficients produces a line, and a line is not a search plan.
+  </p>
+
+  <div class="box stop">
+    <div class="box-title">Why ORCA will not tell you where the person is</div>
+    <p>
+      The model produces an average position. It would be the easiest number to put in
+      large type, and ORCA deliberately shows it small, labelled as the centre of a
+      distribution rather than a location.
+    </p>
+    <p style="margin-top:2mm">
+      A single predicted point is the most dangerous output a drift model can produce:
+      it is wrong, it looks authoritative, and a coordinated search will concentrate on
+      it. So the output is two nested areas — the region containing 50% of the
+      particles, and the region containing 95% — and the interface says which is which.
+    </p>
+  </div>
+
+  <p>
+    One correction during development is worth recording, because it points at
+    something general. The first version produced a 3-hour search area for a person in
+    the water of 2.3 square kilometres, which would send a boat crew to look at one
+    wave. Two things were wrong: a diffusion term had the wrong units and contributed
+    about six metres, and — far more importantly — the <em>current forecast's own
+    error</em> was missing entirely.
+  </p>
+  <p>
+    That error is the dominant term. A person in the water has almost no sail area, so
+    the size of their search area is set by how wrong the current analysis is, not by
+    the object's leeway. It is around 0.15 metres per second at this resolution, and it
+    is <em>correlated over time</em> — a current forecast that is too fast in one hour
+    is usually too fast in the next. So it is drawn once per particle and held.
+    Treating it as fresh random noise each step understates the area by a factor of the
+    square root of the number of steps. The corrected 3-hour area is 50 square
+    kilometres, and a 24-hour life-raft search is 5,871.
+  </p>
+  <p>
+    ORCA now reports which term dominates the spread, so a search coordinator can
+    judge whether a better current forecast would change their plan.
+  </p>
+
+  <h3>Journey 4 — An alert nobody asked for</h3>
+  <p>
+    Everything above is request and response: you ask, ORCA answers. The trip monitor
+    is the exception.
+  </p>
+  <p>
+    You mark a position as watched. Every two minutes ORCA re-assesses it. And here is
+    the entire design of the feature:
+  </p>
+
+  <div class="box plain">
+    <div class="box-title">Alerts fire on transitions, never on state</div>
+    <p>
+      A system that announces "NO-GO at Kasimedu" every two minutes has produced a
+      feed. And a feed is something people learn to ignore — which means the one alert
+      that mattered scrolls past with the ninety that did not.
+    </p>
+    <p style="margin-top:2mm">
+      So ORCA alerts only when something <em>crossed a line</em> since the last check:
+      the verdict changed band, a new hard limit was exceeded, the safety margin
+      narrowed materially within one band, a boundary state changed, or fresh data went
+      stale. The first check after you start watching records a baseline and raises
+      nothing — alerting on the first observation would fire for a condition that was
+      already true when you asked to be watched. You had just looked at it.
+    </p>
+    <p style="margin-top:2mm">
+      And every alert carries what it <em>was</em> beside what it <em>is</em>. "NO-GO"
+      alone is a status line the verdict card already shows. "GO → NO-GO, index 92 →
+      24, lightning crossed 60%" is an alert.
+    </p>
+  </div>
+
+  <p>
+    Improvements are reported too — a fisherman told NO-GO at 04:00 wants to know that
+    07:00 is GO — but at a low severity, so they can never sort above a deterioration.
+  </p>
+
+  <div class="box caution">
+    <div class="box-title">What the monitor deliberately does not do</div>
+    <p>
+      It sends nothing anywhere. No SMS, no push notification, no email. ORCA has no
+      authority to contact a fisherman, and a prototype that quietly acquires a
+      notification channel is a prototype that can spam a real person. Alerts live in
+      the console, and the interface says so in the panel footer so that nobody
+      demonstrates the feature as something it is not.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ PART 6 -->
+<section class="part">
+  <div class="part-no">Part 6</div>
+  <h2>The science, explained</h2>
+
+  <p class="lead">
+    This part answers the fair question: is the mathematics real, or is it decoration
+    with scientific-sounding labels? Five pieces, each with the reasoning and the
+    mistake we made getting there.
+  </p>
+
+  <h3>1 · The number-integrity guard</h3>
+  <p>
+    The most interesting engineering in the project, and it exists because of a single
+    observation: <b>translation systems are fluent, and fluency is what makes their
+    mistakes dangerous.</b>
+  </p>
+
+  <div class="box stop">
+    <div class="box-title">Three real failures, all from live testing</div>
+    <p>
+      Asked to translate an advisory beginning <b>"NO-GO"</b>, the translation service
+      returned Tamil meaning roughly <em>"punishment for those who go astray"</em>.
+      Fluent, confident, and it destroyed the one word the entire advisory exists to
+      convey.
+    </p>
+    <p style="margin-top:2mm">
+      Asked to translate <b>"wind = 14.7 kn (limit 22 kn)"</b>, it returned Tamil
+      reading <em>"14.7 kilometres"</em>. Every digit survived perfectly and the
+      sentence was still wrong about the physical quantity — which is worse than losing
+      a number, because a missing number is visibly missing and 14.7 km of wind reads
+      as a real measurement.
+    </p>
+    <p style="margin-top:2mm">
+      And the model that writes the answers uses a typographically correct
+      non-breaking hyphen in <b>"NO‑GO"</b> about half the time. Our protection pattern
+      was written with an ordinary hyphen, so it did not match, and the verdict came
+      back as <b>"NO‽GO"</b> — with an interrobang in the middle of it.
+    </p>
+  </div>
+
+  <p>ORCA's answer is to never trust the translation, and to prove it instead:</p>
+  <ol>
+    <li>
+      <b>Mask.</b> Every protected item — numerals, verdict words, compass bearings,
+      agency names, and confusable units — is replaced with an opaque placeholder. The
+      translator never sees a digit at all, so it cannot round, localise or "correct"
+      one.
+    </li>
+    <li><b>Translate</b> the masked text.</li>
+    <li><b>Re-inject</b> the originals, character for character. What comes out is byte-for-byte what went in.</li>
+    <li>
+      <b>Verify</b> — and this is the subtle part — as a <em>multiset</em>. Not a set,
+      because "1.5 metres and 1.5 metres" is different from "1.5 metres" and a set
+      cannot tell. Not a sequence, because a language with different word order will
+      legitimately reorder the figures. A multiset counts occurrences and ignores
+      order, which is exactly right.
+    </li>
+    <li>
+      <b>Fail safely.</b> If verification fails, that clause is <em>not spoken and not
+      shown as translated</em>. It stays in English. A mostly-Tamil advisory with one
+      English clause is far more useful than an all-English one, and infinitely better
+      than a fluent Tamil sentence with the wrong wave height in it.
+    </li>
+  </ol>
+
+  <h4>The judgement call inside the unit list</h4>
+  <p>
+    The protected-unit list is deliberately narrow. It is <em>not</em> every unit.
+    Rendering "8.4 km" as "8.4 கிமீ" is correct, idiomatic, and clearer for a Tamil
+    reader — forcing every unit into Latin script would make the advisory worse. What
+    is protected is only the set where a wrong translation swaps one quantity for
+    another: knots (confusable with kilometres, which is exactly what happened),
+    nautical miles (or nanometres), and compound units like metres per second and
+    joules per kilogram that have no short vernacular form and get spelled out into
+    something unrecognisable.
+  </p>
+
+  <div class="box plain">
+    <div class="box-title">A bug that would have shipped a placeholder as a wave height</div>
+    <p>
+      Placeholders are built as text with a letter-coded index and an "XX" terminator,
+      deliberately containing no digits. When a unit immediately follows a figure, two
+      placeholders end up adjacent. With a 26-letter index alphabet, the pattern that
+      finds them matched <em>greedily</em> across both, treated the whole run as one
+      placeholder with an out-of-range index, and left it in place unchanged.
+    </p>
+    <p style="margin-top:2mm">
+      The numeral became unrecoverable, and the advisory would have gone out with a
+      placeholder where a wave height belonged. The index alphabet now excludes the
+      letter X, so the pattern stops at the first terminator; an unrecognisable index
+      returns an explicit failure rather than defaulting to zero, because substituting
+      the <em>first</em> numeral wherever a corrupted placeholder appears is a wrong
+      figure rather than a visible one.
+    </p>
+  </div>
+
+  <h3>2 · Units read, never assumed</h3>
+  <p>
+    The worst bug in the project's history, and the one that changed how everything
+    else was written.
+  </p>
+  <p>
+    ORCA was reading ocean current speed and labelling it metres per second. The
+    service was returning knots. That is a factor of about two — silently, on a value
+    that feeds routing and search-and-rescue drift, where being twice wrong about how
+    fast the water is moving puts a search area in the wrong place.
+  </p>
+  <p>The cause was mundane: a global setting for wind speed units was being applied to the current speed as well. The fix is a principle:</p>
+  <div class="box good">
+    <div class="box-title">The rule that came out of it</div>
+    <p>
+      <b>Never assume a unit. Read the unit the response declares, and convert.</b> And
+      if the conversion is not one ORCA knows to be physically meaningful, the value
+      becomes <b>UNAVAILABLE</b> rather than being passed through with a hopeful label.
+      A refusal is always better than a wrong number.
+    </p>
+  </div>
+
+  <h3>3 · The direction convention trap</h3>
+  <p>
+    Marine data contains a genuine, standardised, and deeply confusing inconsistency:
+  </p>
+  <ul>
+    <li><b>Wind direction</b> is the direction the wind comes <em>from</em>. A "northerly" wind blows from north to south.</li>
+    <li><b>Current direction</b> is the direction the water flows <em>to</em>. A "northerly" current flows towards the north.</li>
+  </ul>
+  <p>
+    These are opposite conventions for the same-looking number, and getting one
+    backwards produces a field that looks completely plausible and points exactly the
+    wrong way. Nobody notices in a screenshot. Every fisherman notices immediately, and
+    a drift calculation would send a search in the wrong direction.
+  </p>
+  <p>
+    ORCA handles this in exactly one place. Both conversions go through one function
+    that takes the convention as an explicit argument, because writing the sign flip
+    twice is how the two end up agreeing when they should not — and that had already
+    happened once.
+  </p>
+
+  <h3>4 · Finding fishing zones</h3>
+  <p>
+    Fish gather at <b>thermal fronts</b> — the boundaries where warm and cool water
+    meet. The temperature gradient there concentrates nutrients, which concentrates
+    plankton, which concentrates fish.
+  </p>
+  <p>
+    INCOIS publishes daily fishing advisories, but as picture maps designed for human
+    eyes. Software cannot read a picture of a map. So ORCA re-implements the published
+    method from the same underlying satellite measurements, and is explicit that this
+    is a reimplementation rather than the official product.
+  </p>
+  <p>Three front-detection methods are available, and the interface names which produced the layer you are looking at:</p>
+  <table class="tight">
+    <thead><tr><th style="width:40mm">Method</th><th>How it works</th></tr></thead>
+    <tbody>
+      <tr><td><b>Sobel gradient</b></td><td>The classic edge-finding filter. Fast, simple, sensitive to noise.</td></tr>
+      <tr><td><b>Canny detector</b></td><td>Smooths first, then finds edges, then follows them. Cleaner lines.</td></tr>
+      <tr><td><b>Cayula–Cornillon SIED</b></td><td>Single Image Edge Detection — purpose-built for ocean fronts. Splits a window's temperatures into two groups and only accepts a front if the split is statistically strong, the histogram genuinely has two peaks, and the pixels on each side are spatially coherent. Three tests rather than one, which is why it produces far fewer false fronts.</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Zones are ranked, and — this is the honest part — the output reports which criteria
+    <em>could not be applied</em>. So a missing rank reads as "not checked" rather than
+    "poor water".
+  </p>
+
+  <h3>5 · The 3D sea surface</h3>
+  <p>
+    The sea view exists to answer a question a number cannot. "Significant wave height
+    2.64 m, limit 1.5 m" is a comparison of two decimals. An 8.2-metre boat in a
+    125-metre swell with a red contour ringing the crest above its gunwale is a
+    picture, and it is the same data.
+  </p>
+  <p>Every wave parameter comes from the forecast:</p>
+  <ul>
+    <li><b>Height</b> from the significant wave height.</li>
+    <li>
+      <b>Wavelength</b> from the deep-water dispersion relation, <code>L = gT²/2π</code>
+      — the physical law linking a wave's period to its length. An 8.8-second swell is
+      therefore about 120 metres long. This is why the scene is hundreds of metres
+      across and why the boat looks small. That is the honest picture.
+    </li>
+    <li><b>Direction</b> from the reported bearing, flipped — see the convention trap above.</li>
+    <li><b>Chop</b> on top, from wind speed. Labelled as texture rather than measurement.</li>
+  </ul>
+  <p>
+    The boat is drawn to its real length overall and floats by evaluating the same wave
+    formula the graphics hardware uses, sampled at bow and stern rather than at a point
+    — which is the physical reason a longer hull rides flatter and earns a higher limit.
+  </p>
+
+  <div class="box caution">
+    <div class="box-title">Where the render is gentler than the sea, and says so</div>
+    <p>
+      The wave shape used is a <b>Gerstner wave</b> — a formulation where water
+      particles move in circles, which is what gives real waves sharp crests and broad
+      troughs. Above a steepness of 1 the formulation folds through itself and the
+      surface turns inside out. Real waves break near that limit too, so the cap is
+      physical rather than a graphics trick — but it is a cap, and when it engages ORCA
+      renders a gentler sea than the forecast describes.
+    </p>
+    <p style="margin-top:2mm">
+      So the panel says so: "Drawn at 2.31 m rather than 2.64 m — the sea is worse than
+      this render." A visual that quietly understates a dangerous sea is the one failure
+      this feature must not have.
+    </p>
+  </div>
+
+  <p>
+    Two other decisions came from looking at it rather than reasoning about it. The
+    camera was originally 37 metres up, where a 2.6-metre swell over a 125-metre
+    wavelength is a slope of about 1 in 23 and reads as a flat tilting plane —
+    arithmetically true and completely misleading. It is now at 4.2 metres, eye height
+    on a small boat, where the same crests rise into the horizon and periodically hide
+    it. And the mesh cannot resolve anything smaller than about 8 metres, which is
+    where almost all of the sea's visual character lives — so fine ripple is added as a
+    lighting effect rather than as geometry, without which the specular highlight lands
+    as one soft blob and the water reads as plastic.
+  </p>
+
+  <h3>6 · A note on the visual treatments</h3>
+  <p>
+    ORCA has seven visual styles: standard, thermal, night-vision, radar, bathymetric,
+    CRT and noir. They are built as colour transforms applied by the browser's
+    compositor rather than as a shader pass over the map, and the reason is measured
+    rather than assumed: the console draws two stacked graphics surfaces, and sampling
+    those into a shader means reading both back from the graphics card every frame.
+    That already produces measurable stalls in this application's own browser logs, and
+    it would cost exactly the performance budget the frame-rate guard exists to
+    protect.
+  </p>
+  <p>
+    The frame-rate guard measures the <em>median</em> frame time, not the average — one
+    400-millisecond pause while a data layer decodes would drag an average below any
+    threshold and trip the guard on a machine that is perfectly fine. When it does
+    trip, it turns the treatment <b>off</b> and says why, rather than displaying a
+    number and doing nothing.
+  </p>
+</section>
+
+<!-- ============================================================ PART 7 -->
+<section class="part">
+  <div class="part-no">Part 7</div>
+  <h2>What we refuse to do</h2>
+
+  <p class="lead">
+    These are not gaps. They are decisions, and they are as much a part of the
+    architecture as anything we did build.
+  </p>
+
+  <table>
+    <thead><tr><th style="width:52mm">We do not…</th><th>Because</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>…issue warnings</b></td>
+        <td>
+          The IMD and INCOIS do that, with legal authority and accountability that ORCA
+          does not have. Every surface says ORCA supplements and never replaces them, and
+          the machine-readable export is shaped to <em>feed</em> their systems rather
+          than to compete with them.
+        </td>
+      </tr>
+      <tr>
+        <td><b>…let the AI decide anything</b></td>
+        <td>
+          Enforced four separate ways, described in Part 3. The model explains a
+          verdict. It never issues or softens one.
+        </td>
+      </tr>
+      <tr>
+        <td><b>…send messages to anyone</b></td>
+        <td>
+          No SMS, no push, no email. ORCA has no authority to contact a fisherman, and a
+          prototype that quietly acquires a notification channel is one that can spam a
+          real person.
+        </td>
+      </tr>
+      <tr>
+        <td><b>…give a single predicted position for a missing person</b></td>
+        <td>
+          A search area with a stated containment fraction. A coordinated search
+          concentrating on one point because software offered one is a worse outcome
+          than no software at all.
+        </td>
+      </tr>
+      <tr>
+        <td><b>…let simulated data touch a safety decision</b></td>
+        <td>
+          SIMULATED is excluded from decision-grade evidence by the type system.
+          Demonstration data is drawn with a hatched pattern and is never silently mixed
+          with live measurements.
+        </td>
+      </tr>
+      <tr>
+        <td><b>…show a legend that does not match the pixels</b></td>
+        <td>
+          Legends are generated from the same lookup tables that colour the image. When
+          a visual treatment recolours the map, the legends hide themselves and say why.
+        </td>
+      </tr>
+      <tr>
+        <td><b>…switch off encryption verification to make a connection work</b></td>
+        <td>
+          INCOIS's certificate chain is incomplete. The easy fix is one line that
+          disables checking. ORCA ships the missing intermediate certificate instead and
+          completes the chain properly.
+        </td>
+      </tr>
+      <tr>
+        <td><b>…guess a unit</b></td>
+        <td>
+          Read the declared unit and convert; refuse the value if the conversion is not
+          physically meaningful. A refusal is better than a wrong number.
+        </td>
+      </tr>
+      <tr>
+        <td><b>…treat a refusal as a failure</b></td>
+        <td>
+          "No safe passage, and here is what blocks it" and "UNVERIFIABLE, and here is
+          what was missing" are successful answers. They are given the same visual weight
+          as a positive result, not hidden in an error state.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="box good">
+    <div class="box-title">The claim we do make</div>
+    <p>
+      ORCA is safety-of-life-<em>adjacent</em> decision support. It is not a certified
+      marine safety system, and real deployment would need validation against historical
+      incident data and sign-off from a maritime safety authority. We say this in the
+      product, not just in the documentation.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ PART 8 -->
+<section class="part">
+  <div class="part-no">Part 8</div>
+  <h2>What is not built yet</h2>
+
+  <p class="lead">
+    Stated by us rather than found by you. Each row says what it is, why it matters,
+    and what it would take.
+  </p>
+
+  <h3>Designed and not built</h3>
+
+  <table>
+    <thead><tr><th style="width:44mm">Feature</th><th>What is missing, and what it would take</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>Persistence layer</b><br><span class="pill partial">Partial</span></td>
+        <td>
+          ORCA probes for PostgreSQL with the PostGIS spatial extension at startup and
+          falls back to in-memory spatial indexing when it is absent — and that fallback
+          works. But the repository layer that would actually store and retrieve records
+          is not written. Consequence: <b>nothing survives a restart.</b> Agent traces,
+          alerts and watched positions all live in memory. A day's work to build against
+          the existing schema design.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Replayable trace storage</b><br><span class="pill partial">Partial</span></td>
+        <td>
+          You can replay any agent run from this session, but the storage is a bounded
+          in-memory buffer. The database tables designed for it are not wired up. This is
+          the same work as the row above.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Langfuse observability</b><br><span class="pill later">Later</span></td>
+        <td>
+          Langfuse is a service for recording and analysing AI system behaviour over
+          time — which prompts are slow, which fail, how often the critic rejects a
+          draft. Credentials are configured and dormant. Would matter for operating ORCA
+          at scale; matters little for a demonstration.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Satellite overpass prediction</b><br><span class="pill later">Later</span></td>
+        <td>
+          "When will a satellite next photograph this patch of sea?" Answering it needs
+          <b>SGP4</b> — the standard orbital propagator that turns published orbital
+          element sets into a position over time. The data adapter exists; the propagator
+          and its interface panel do not.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Copernicus Marine, NASA Earthdata, Sentinel Hub</b><br><span class="pill later">Later</span></td>
+        <td>
+          European and American ocean and satellite archives. Credentials load and the
+          system reports them as available; <b>the adapters that would call them are not
+          written.</b> They would add higher-resolution and historical data, and a second
+          independent source for cross-checking. Roughly one day per adapter.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Vessel traffic (AIS) and Global Fishing Watch</b><br><span class="pill later">Later</span></td>
+        <td>
+          AIS is the <b>Automatic Identification System</b> — the transponder signal ships
+          broadcast. It would let ORCA warn about collision risk and show fishing
+          activity. Credentials load; adapters unwritten. Note that free-tier AIS coverage
+          over the Indian Ocean is genuinely sparse, so this would show real vessels
+          marked LIVE and demonstration vessels marked SIMULATED, never mixed.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Authority dashboard</b><br><span class="pill later">Later</span></td>
+        <td>
+          ORCA today is a single-vessel console. A fisheries officer or Coast Guard
+          watchkeeper needs a fleet view: many vessels, aggregate risk, which boats are
+          in trouble. The data model supports it; the interface does not exist.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Multi-leg trip planner</b><br><span class="pill later">Later</span></td>
+        <td>
+          Single-leg routing works. Planning a multi-day trip with fishing stops and
+          weather windows — "leave at 04:00, fish here for six hours, return before the
+          wind builds" — needs routing through time as well as space. A significant
+          extension.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Explicit offline mode</b><br><span class="pill partial">Partial</span></td>
+        <td>
+          Data layers, reference geography and the Earth imagery are all cached on disk
+          and work with no network, so the map and layers survive a dead connection. But
+          there is no explicit "you are offline" banner, and a point forecast for a new
+          position does need the network. The graceful degradation is real; the
+          communication of it is not built.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Broader cross-validation</b><br><span class="pill partial">Partial</span></td>
+        <td>
+          ORCA compares model sea-surface temperature against satellite sea-surface
+          temperature and tells you whether the sources agree or disagree, with the
+          difference measured against combined uncertainty. It is a genuinely good
+          feature — and it is the <em>only</em> pair that is cross-validated. Extending it
+          to waves and wind needs the second-source adapters above.
+        </td>
+      </tr>
+      <tr>
+        <td><b>Lightning: a convective inhibition gate</b><br><span class="pill later">Later</span></td>
+        <td>
+          Discussed under limitations below. ORCA already fetches CIN; using it to gate
+          the lightning veto is a small change with a large effect on usefulness, and it
+          is the single highest-value scientific improvement outstanding.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Known limitations of what <em>is</em> built</h3>
+  <p>
+    Different from the list above. These are things that work, and whose behaviour you
+    should understand before relying on them.
+  </p>
+
+  <div class="box caution">
+    <div class="box-title">1 · The lightning veto is coarse during the monsoon</div>
+    <p>
+      ORCA derives lightning probability from CAPE, because India has no free
+      authoritative real-time lightning feed — the American GOES/GLM instrument does not
+      cover India. CAPE measures thunderstorm <em>potential</em>, not occurrence.
+    </p>
+    <p style="margin-top:2mm">
+      During the south-west monsoon, large stretches of the Indian coast carry
+      2,000–4,500 joules per kilogram, which maps above the 60% veto threshold. The
+      result is that ORCA refuses almost everything in those areas. That is defensible —
+      the IMD does issue widespread thunderstorm warnings in monsoon — and it is also
+      coarse. The honest reading of a lightning-only NO-GO is "thunderstorm potential is
+      high across this whole region", not "a storm is over your boat".
+    </p>
+    <p style="margin-top:2mm">
+      <b>The fix we know about:</b> high CAPE with strong convective inhibition means the
+      atmosphere is capped and storms will not fire. Gating on CIN is standard
+      meteorological practice, ORCA already fetches CIN, and it is not yet used. This is
+      the most valuable unbuilt thing in the system.
+    </p>
+  </div>
+
+  <div class="box caution">
+    <div class="box-title">2 · A coarser routing grid is a more conservative router</div>
+    <p>
+      When a route is long, the grid coarsens to stay inside the weather service's
+      request budget. Coarsening makes ORCA <em>more</em> cautious, not less: one
+      forbidden 60-kilometre cell now blocks a corridor a boat might have threaded. ORCA
+      says so in the response when it happens, and suggests re-checking on a shorter leg.
+    </p>
+  </div>
+
+  <div class="box caution">
+    <div class="box-title">3 · Free-tier AI provider models move without notice</div>
+    <p>
+      At one point in development, three of four language-model providers were
+      simultaneously unavailable for three unrelated reasons: one model was withdrawn
+      from new users, one free tier was removed, and one was returning empty answers
+      because it is a reasoning model that spent its entire token budget thinking. All
+      three were fixed, but the general problem does not go away.
+    </p>
+    <p style="margin-top:2mm">
+      ORCA's mitigation is structural: four providers tried in order, a template-based
+      fallback if all four fail, an endpoint reporting which provider actually answered,
+      and — most importantly — <b>the deterministic verdict does not depend on any of
+      them.</b> If every AI provider on Earth went down, ORCA would still compute a
+      correct, cited GO / NO-GO.
+    </p>
+  </div>
+
+  <div class="box caution">
+    <div class="box-title">4 · Thresholds are ours, not INCOIS's</div>
+    <p>
+      Already stated in Part 4, repeated here because it is the limitation most likely to
+      matter in a real deployment. The boat-class limits are seeded from peer-reviewed
+      small-craft literature, cited per row, versioned, and displayed on every verdict.
+      They are defensible and replaceable. They are not official.
+    </p>
+  </div>
+</section>
+
+<!-- ============================================================ PART 9 -->
+<section class="part">
+  <div class="part-no">Part 9</div>
+  <h2>Glossary</h2>
+
+  <p class="lead">
+    Every abbreviation and technical term used in this document, alphabetically, with
+    full forms spelled out.
+  </p>
+
+  <div class="glossary">
+  <dl>
+    <dt>A* (A-star)</dt><dd>A path-finding algorithm. Finds the cheapest route through a network by combining the cost already spent with an estimate of the cost remaining. ORCA uses it for sea routing.</dd>
+
+    <dt>Admissible heuristic</dt><dd>In path-finding, an estimate of remaining cost that never over-estimates. It is what guarantees the route found is genuinely the cheapest rather than merely a plausible one. ORCA's estimate is plain straight-line distance with no risk term, precisely to keep this guarantee.</dd>
+
+    <dt>Agent</dt><dd>An AI system given tools and permission to use them in a sequence it chooses, rather than only answering from memory.</dd>
+
+    <dt>AIS — Automatic Identification System</dt><dd>The transponder signal ships broadcast giving identity, position, course and speed. Used for collision avoidance and traffic monitoring.</dd>
+
+    <dt>AOI — Area of Interest</dt><dd>The geographic rectangle ORCA covers: 60°E–100°E, 0°N–25°N.</dd>
+
+    <dt>API — Application Programming Interface</dt><dd>A defined way for one piece of software to request information or action from another.</dd>
+
+    <dt>ASR — Automatic Speech Recognition</dt><dd>Converting spoken audio into text. Also called speech-to-text or STT.</dd>
+
+    <dt>Backend</dt><dd>The part of a system that runs on a server and does the work — fetching data, calculating, deciding.</dd>
+
+    <dt>Bathymetry</dt><dd>The depth and shape of the sea floor. The underwater equivalent of topography.</dd>
+
+    <dt>Bhashini</dt><dd>The Government of India's national language technology platform, providing translation and speech for Indian languages.</dd>
+
+    <dt>CAP — Common Alerting Protocol</dt><dd>An international standard format for emergency alerts, published by OASIS. India's NDMA SACHET system and the IMD publish in it. ORCA exports CAP 1.2.</dd>
+
+    <dt>CAPE — Convective Available Potential Energy</dt><dd>How much energy the atmosphere has available to build thunderstorms, in joules per kilogram. Measures potential, not occurrence.</dd>
+
+    <dt>Cayula–Cornillon SIED</dt><dd>Single Image Edge Detection. A method designed specifically for finding ocean temperature fronts in satellite imagery, using three independent statistical tests before accepting a front.</dd>
+
+    <dt>Chlorophyll-a</dt><dd>The green pigment in plant plankton. Satellites measure it as a proxy for how much food is in the water, which is a proxy for where fish are.</dd>
+
+    <dt>CIN — Convective Inhibition</dt><dd>The energy that must be overcome before a thunderstorm can form. High CAPE with high CIN means the atmosphere is "capped" and storms will not fire. ORCA fetches it but does not yet use it.</dd>
+
+    <dt>Circuit breaker</dt><dd>A software pattern that stops calling a failing service for a period, rather than repeatedly retrying something that is down.</dd>
+
+    <dt>CMEMS — Copernicus Marine Environment Monitoring Service</dt><dd>The European Union's operational ocean data service.</dd>
+
+    <dt>Compositor</dt><dd>The part of a web browser that assembles the final image from layers, using the graphics card. Effects applied here are cheap; effects requiring data to be read back from the graphics card are not.</dd>
+
+    <dt>CORS — Cross-Origin Resource Sharing</dt><dd>Browser security rules governing whether a page from one website may fetch data from another. Relevant to why ORCA proxies NASA imagery through its own server.</dd>
+
+    <dt>deck.gl</dt><dd>A graphics library for drawing large data layers on maps using the computer's graphics hardware.</dd>
+
+    <dt>Deterministic</dt><dd>Always producing the same output from the same input, traceably. The opposite of a language model's behaviour.</dd>
+
+    <dt>Dijkstra's algorithm</dt><dd>A path-finding method that explores outward from the start in all directions. Slower than A* but requires no estimate. ORCA uses it in a test to verify A*'s answers.</dd>
+
+    <dt>Dispersion relation</dt><dd>The physical law linking a water wave's period to its wavelength. In deep water, wavelength = gravity × period² ÷ 2π.</dd>
+
+    <dt>EEZ — Exclusive Economic Zone</dt><dd>The sea area a country controls economically, extending 200 nautical miles from its coast.</dd>
+
+    <dt>ERDDAP</dt><dd>Environmental Research Division's Data Access Program. Scientific data server software; INCOIS runs one.</dd>
+
+    <dt>ETag — Entity Tag</dt><dd>A fingerprint a server attaches to data so a client can ask "has this changed?" and receive a small "no" instead of the whole thing again.</dd>
+
+    <dt>Frontend</dt><dd>The part of a system a user sees and interacts with. Runs in the browser.</dd>
+
+    <dt>Geodesic</dt><dd>The shortest path between two points on a curved surface. Computing distances on the Earth's actual ellipsoidal shape rather than treating coordinates as flat.</dd>
+
+    <dt>Geofence</dt><dd>A virtual boundary that triggers a notification when crossed or approached.</dd>
+
+    <dt>Gerstner wave</dt><dd>A mathematical description of water waves in which particles move in circles, producing the sharp crests and broad troughs real waves have.</dd>
+
+    <dt>GFW — Global Fishing Watch</dt><dd>An organisation publishing global fishing-activity data derived from vessel transponder signals.</dd>
+
+    <dt>GIBS — Global Imagery Browse Services</dt><dd>NASA's service for global satellite imagery. Source of ORCA's Earth textures.</dd>
+
+    <dt>GLSL — OpenGL Shading Language</dt><dd>The programming language for writing small programs that run on a graphics card, used for the 3D ocean surface.</dd>
+
+    <dt>H3</dt><dd>A system that divides the Earth into hexagonal cells at multiple sizes, useful for spatial aggregation.</dd>
+
+    <dt>Hs — Significant Wave Height</dt><dd>Roughly the average height of the highest third of waves, in metres. The standard measure of sea roughness.</dd>
+
+    <dt>HTTP</dt><dd>The protocol web browsers and servers use to talk to each other.</dd>
+
+    <dt>IAMSAR</dt><dd>International Aeronautical and Maritime Search and Rescue manual. The internationally agreed reference for search-and-rescue procedure, including the drift model ORCA implements.</dd>
+
+    <dt>IMBL — International Maritime Boundary Line</dt><dd>An agreed sea border between two countries. The India–Sri Lanka line in Palk Bay is the one that matters most to Indian fishermen.</dd>
+
+    <dt>IMD — India Meteorological Department</dt><dd>India's national weather service; issues official marine warnings.</dd>
+
+    <dt>INCOIS — Indian National Centre for Ocean Information Services</dt><dd>India's ocean information agency. Publishes fishing advisories and ocean forecasts.</dd>
+
+    <dt>ISRO — Indian Space Research Organisation</dt><dd>India's space agency; operates the satellites behind MOSDAC's data.</dd>
+
+    <dt>Knot (kn)</dt><dd>One nautical mile per hour, about 1.85 km/h. The marine unit for speed.</dd>
+
+    <dt>LangGraph</dt><dd>A framework for building AI workflows as an explicit graph of steps rather than one large instruction.</dd>
+
+    <dt>Langfuse</dt><dd>A service for recording and analysing AI system behaviour over time.</dd>
+
+    <dt>Leeway</dt><dd>In search and rescue, an object's own movement through the water caused by wind, as distinct from being carried by the current. Has both a downwind and a sideways component.</dd>
+
+    <dt>LLM — Large Language Model</dt><dd>The kind of AI behind ChatGPT and similar tools. Excellent at understanding and writing language; unreliable at exact arithmetic and rule-following.</dd>
+
+    <dt>LOA — Length Overall</dt><dd>A boat's total length, bow to stern. Determines its safety class in ORCA.</dd>
+
+    <dt>MapLibre</dt><dd>An open-source mapping library. ORCA uses its globe projection.</dd>
+
+    <dt>Monte Carlo simulation</dt><dd>Running a calculation many times with randomly varied inputs to see the spread of possible outcomes, rather than computing one answer. ORCA runs 2,000 particles for drift.</dd>
+
+    <dt>MOSDAC</dt><dd>Meteorological and Oceanographic Satellite Data Archival Centre. ISRO's satellite data portal.</dd>
+
+    <dt>MRCC — Maritime Rescue Co-ordination Centre</dt><dd>The Coast Guard facility that co-ordinates a search and rescue operation.</dd>
+
+    <dt>Multiset</dt><dd>A collection that counts repeats but ignores order. ORCA verifies translated numbers as a multiset: "1.5 and 1.5" differs from "1.5", but reordering by grammar is allowed.</dd>
+
+    <dt>Nautical mile (nm)</dt><dd>1,852 metres. One minute of latitude.</dd>
+
+    <dt>NDMA — National Disaster Management Authority</dt><dd>India's disaster management body; operates the SACHET alert system.</dd>
+
+    <dt>OASIS</dt><dd>The standards organisation that publishes the Common Alerting Protocol.</dd>
+
+    <dt>Otsu's method</dt><dd>A statistical technique for finding the best threshold to split a set of values into two groups. Used inside the SIED front detector.</dd>
+
+    <dt>PFZ — Potential Fishing Zone</dt><dd>An advisory indicating where fish are likely to be found.</dd>
+
+    <dt>PostGIS</dt><dd>An extension to the PostgreSQL database adding geographic capability. ORCA uses it when present and falls back gracefully when not.</dd>
+
+    <dt>Provenance</dt><dd>The origin and history of a piece of data. ORCA tracks six states for every value.</dd>
+
+    <dt>Pydantic</dt><dd>A Python library that checks data has the right shape at the moment it is created. ORCA uses it to make invalid data impossible to construct.</dd>
+
+    <dt>r3f — React Three Fiber</dt><dd>A library for building 3D scenes in a web application. Used for the opening globe and the ocean surface.</dd>
+
+    <dt>Redis</dt><dd>A fast in-memory data store used for caching. Optional in ORCA.</dd>
+
+    <dt>SACHET</dt><dd>India's national public alert system, operated by the NDMA.</dd>
+
+    <dt>SAR — Search and Rescue</dt><dd>Operations to locate and recover people in distress at sea.</dd>
+
+    <dt>SGP4</dt><dd>Simplified General Perturbations model 4. The standard method for calculating where a satellite is from published orbital data. Not yet implemented in ORCA.</dd>
+
+    <dt>Shader</dt><dd>A small program that runs on a graphics card, calculating the position or colour of points and pixels. What draws ORCA's 3D ocean.</dd>
+
+    <dt>SIED</dt><dd>See Cayula–Cornillon SIED.</dd>
+
+    <dt>Sobel and Canny</dt><dd>Two classic image-processing filters for finding edges. Used as simpler alternatives to SIED for front detection.</dd>
+
+    <dt>SQLite</dt><dd>A database that is a single file requiring no server. ORCA's default, so it runs with no infrastructure.</dd>
+
+    <dt>SSE — Server-Sent Events</dt><dd>A web technique for a server to push a stream of updates to a browser over one connection. How ORCA streams its reasoning and its alerts.</dd>
+
+    <dt>SST — Sea Surface Temperature</dt><dd>The temperature of the ocean's top layer.</dd>
+
+    <dt>Staleness</dt><dd>Whether data is too old to trust for its particular purpose. ORCA keeps a separate expiry per variable.</dd>
+
+    <dt>Stokes drift</dt><dd>The slow net transport of water in the direction waves are travelling. Folded into ORCA's measured leeway coefficients rather than modelled separately.</dd>
+
+    <dt>STRtree — Sort-Tile-Recursive tree</dt><dd>A spatial index that groups nearby shapes so a location query can eliminate most of them cheaply before doing exact geometry.</dd>
+
+    <dt>Supervisor pattern</dt><dd>An AI architecture where one component decides which specialist handles each part of a task.</dd>
+
+    <dt>TLE — Two-Line Element set</dt><dd>The compact standard format describing a satellite's orbit. Input to SGP4.</dd>
+
+    <dt>TLS — Transport Layer Security</dt><dd>The encryption behind "https". Its certificate chain must be complete and verified, which is why ORCA ships a missing intermediate certificate rather than disabling checking.</dd>
+
+    <dt>Tp — Peak Wave Period</dt><dd>The time in seconds between successive wave crests at the dominant wave frequency. Determines wavelength via the dispersion relation.</dd>
+
+    <dt>TTS — Text-to-Speech</dt><dd>Converting written text into spoken audio.</dd>
+
+    <dt>Veto</dt><dd>In ORCA's risk engine, a hard limit that forces NO-GO regardless of the weighted index. Implemented as a separate mechanism because a weighted average has no concept of "never".</dd>
+
+    <dt>WebGL</dt><dd>The browser technology that lets a web page use the computer's graphics hardware. Required for ORCA's map and 3D views.</dd>
+
+    <dt>WGS84</dt><dd>The global standard model of the Earth's shape, used by GPS and by ORCA's distance calculations.</dd>
+  </dl>
+  </div>
+</section>
+
+<!-- ============================================================ PART 10 -->
+<section class="part">
+  <div class="part-no">Part 10</div>
+  <h2>The system in numbers</h2>
+
+  <table>
+    <thead><tr><th style="width:62mm">Measure</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Backend code</td><td>~15,200 lines of Python across 43 modules</td></tr>
+      <tr><td>Frontend code</td><td>~9,500 lines of TypeScript, React and CSS across 34 files</td></tr>
+      <tr><td>Automated tests</td><td>312, all passing</td></tr>
+      <tr><td>HTTP endpoints</td><td>47</td></tr>
+      <tr><td>External data sources integrated</td><td>6 built, 8 more with credentials configured and adapters unwritten</td></tr>
+      <tr><td>Agent tools</td><td>8, each with a machine-readable capability description</td></tr>
+      <tr><td>Languages</td><td>11, all with verified speech synthesis</td></tr>
+      <tr><td>Boat classes</td><td>5, with cited limits and a version stamp</td></tr>
+      <tr><td>Provenance states</td><td>6</td></tr>
+      <tr><td>Verdicts</td><td>4 — including UNVERIFIABLE</td></tr>
+      <tr><td>Search-and-rescue object classes</td><td>6, with published leeway coefficients</td></tr>
+      <tr><td>Data layers</td><td>7 colour-mapped fields, 2 vector fields</td></tr>
+      <tr><td>Visual treatments</td><td>7, behind a frame-rate guard</td></tr>
+      <tr><td>Science grid</td><td>800 × 500 cells at 0.05° — 400,000 cells, about 5.5 km each</td></tr>
+      <tr><td>Drift simulation</td><td>2,000 particles, 15-minute integration steps</td></tr>
+      <tr><td>Routing grid</td><td>Cells of about 28 km, count capped by the upstream request budget</td></tr>
+      <tr><td>Infrastructure required to run</td><td><b>None.</b> SQLite and in-process caching by default; PostGIS and Redis are optional upgrades detected at startup</td></tr>
+    </tbody>
+  </table>
+
+  <hr class="rule">
+
+  <h3>Where to go next</h3>
+  <table class="tight">
+    <thead><tr><th style="width:62mm">Document</th><th>What it is</th></tr></thead>
+    <tbody>
+      <tr><td><code>docs/REQUIREMENT_MATRIX.md</code></td><td>Every claim in the system, its state, and how to verify it on a running machine.</td></tr>
+      <tr><td><code>docs/DEMO_SCRIPT.md</code></td><td>An eight-minute demonstration, live, without a code change — including what to say and what to do if something breaks on stage.</td></tr>
+      <tr><td><code>docs/ORCA_System_Design.html</code></td><td>The visual system-design diagram.</td></tr>
+      <tr><td><code>docs/PLAN.md</code></td><td>The original sixteen-step build plan.</td></tr>
+      <tr><td><code>README.md</code></td><td>How to run it, and the honest-limits list.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="box good" style="margin-top:10mm">
+    <div class="box-title">In one sentence</div>
+    <p style="font-size:11.5pt">
+      ORCA answers a fisherman's question in his own language and out loud, shows every
+      number's source and age, computes the go / no-go with a fixed rule engine the
+      artificial intelligence is not permitted to overrule, and says "I cannot tell" when
+      it cannot — which is the only version of this product that is safe to ship.
+    </p>
+  </div>
+</section>
+
+</body>
+</html>

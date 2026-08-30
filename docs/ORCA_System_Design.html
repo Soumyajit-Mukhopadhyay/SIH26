@@ -1,0 +1,1105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ORCA System Spine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+/* ===========================================================================
+   ORCA Deep — the project's own design language, reused verbatim.
+   An instrument panel, not a website. The rules, unchanged from the product:
+     · monospace for data, sans for prose
+     · amber means WARNING, red means CRITICAL — never decorative
+     · colour is never the only carrier of meaning; every state pairs a colour
+       with a word, because a colour-blind judge must get the same information
+   Single-theme on purpose: this is a committed visual world, so every colour
+   including the page ground is painted explicitly rather than inherited.
+   =========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  --abyss-0: #04090f;
+  --abyss-1: #070f18;
+  --abyss-2: #0b1725;
+  --abyss-3: #122335;
+  --hairline: rgb(255 255 255 / 0.07);
+  --hairline-strong: rgb(255 255 255 / 0.14);
+
+  --cyan: #22d3ee;
+  --amber: #f59e0b;
+  --red: #ef4444;
+  --jade: #34d399;
+  --violet: #a78bfa;
+  --live: #38bdf8;
+
+  --ink-0: #e8f0f7;
+  --ink-1: #94a8bb;
+  --ink-2: #5b6f83;
+  --ink-3: #37485a;
+
+  --sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --gutter: 3.25rem;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--abyss-0);
+  color: var(--ink-0);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  /* A faint vignette so the spine sits in space rather than on a flat sheet. */
+  background-image:
+    radial-gradient(ellipse 120% 60% at 50% -10%, rgb(34 211 238 / 0.055), transparent 60%),
+    radial-gradient(ellipse 90% 50% at 50% 108%, rgb(52 211 153 / 0.035), transparent 60%);
+  background-attachment: fixed;
+}
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.eyebrow {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.shell {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 0 clamp(1rem, 3vw, 2.5rem) 5rem;
+}
+
+/* ---------------------------------------------------------------- masthead */
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgb(4 9 15 / 0.88);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--hairline);
+}
+.masthead-inner {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 0.7rem clamp(1rem, 3vw, 2.5rem);
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+.wordmark {
+  font-weight: 700;
+  font-size: 1.0625rem;
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+}
+.masthead .strap {
+  font-size: 0.75rem;
+  color: var(--ink-1);
+  border-left: 1px solid var(--hairline-strong);
+  padding-left: 1.25rem;
+  max-width: 46ch;
+}
+.masthead .counts {
+  margin-left: auto;
+  display: flex;
+  gap: 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-2);
+}
+.masthead .counts b { color: var(--ink-0); font-weight: 500; }
+
+/* -------------------------------------------------------------------- hero */
+.hero {
+  padding: clamp(2.25rem, 5vw, 3.75rem) 0 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 4vw, 3.5rem);
+  align-items: end;
+}
+.hero h1 {
+  font-size: clamp(1.75rem, 3.6vw, 2.75rem);
+  line-height: 1.14;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  margin: 0.6rem 0 0;
+  text-wrap: balance;
+  max-width: 26ch;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--cyan);
+}
+.thesis {
+  border-left: 2px solid var(--jade);
+  padding-left: 1.1rem;
+  font-size: 0.9375rem;
+  color: var(--ink-1);
+  max-width: 52ch;
+}
+.thesis b { color: var(--ink-0); font-weight: 600; }
+
+/* ------------------------------------------------------------------ chips */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.14rem 0.44rem;
+  border-radius: 3px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.chip::before {
+  content: '';
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.chip.built   { color: var(--jade);   border-color: rgb(52 211 153 / 0.35);  background: rgb(52 211 153 / 0.09); }
+.chip.partial { color: var(--amber);  border-color: rgb(245 158 11 / 0.35);  background: rgb(245 158 11 / 0.09); }
+.chip.later   { color: var(--ink-2);  border-color: var(--hairline-strong);  background: rgb(255 255 255 / 0.02); }
+
+/* ------------------------------------------------------------ section head */
+.sec {
+  margin-top: clamp(2.75rem, 6vw, 4.5rem);
+}
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--hairline-strong);
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+.sec-head h2 {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.sec-head p {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ink-1);
+  max-width: 62ch;
+}
+
+/* ============================================================ THE SPINE ==
+   Nine layers. The numbering is real: data enters at 1 and a spoken answer
+   leaves at 9, so the sequence carries information rather than decorating.
+   ======================================================================== */
+.spine {
+  display: grid;
+  grid-template-columns: var(--gutter) minmax(0, 1fr) minmax(0, 19rem);
+  gap: 0 clamp(0.75rem, 2vw, 1.5rem);
+  align-items: start;
+}
+@media (max-width: 1020px) {
+  .spine { grid-template-columns: var(--gutter) minmax(0, 1fr); }
+  .aside { grid-column: 1 / -1; margin-top: 2rem; }
+}
+@media (max-width: 620px) {
+  :root { --gutter: 2.25rem; }
+}
+
+/* --- the flow gutter: data rising, requests descending ------------------- */
+.gutter {
+  position: sticky;
+  top: 4.5rem;
+  align-self: start;
+  height: 30rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+/* Both captions read bottom-to-top, the way an axis label does. Rotating only
+   one of them left it upside down against the other and neither was legible. */
+.gutter .cap {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.1em;
+  color: var(--ink-2);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+}
+.gutter .cap.up { color: var(--live); }
+.gutter .cap.down { color: var(--cyan); }
+.rails {
+  flex: 1;
+  display: flex;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+.rail {
+  width: 2px;
+  border-radius: 1px;
+  background: var(--hairline-strong);
+  position: relative;
+  overflow: hidden;
+}
+.rail::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 34%;
+  border-radius: 1px;
+}
+.rail.up::after    { background: linear-gradient(to top, transparent, var(--live), transparent);  animation: rise 3.6s linear infinite; }
+.rail.down::after  { background: linear-gradient(to bottom, transparent, var(--cyan), transparent); animation: fall 3.6s linear infinite; }
+@keyframes rise { from { top: 100%; } to { top: -34%; } }
+@keyframes fall { from { top: -34%; } to { top: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .rail.up::after, .rail.down::after { animation: none; top: 33%; opacity: 0.6; }
+}
+
+/* --- a layer ------------------------------------------------------------ */
+.layers { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.layer {
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--abyss-1);
+  transition: background 160ms var(--ease), border-color 160ms var(--ease);
+}
+.layer:hover { background: var(--abyss-2); border-color: var(--hairline-strong); }
+
+.layer-btn {
+  all: unset;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 13rem) minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.72rem 0.9rem;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.layer-btn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.layer-n {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ink-3);
+  text-align: right;
+}
+.layer-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.layer-sub {
+  font-size: 0.75rem;
+  color: var(--ink-1);
+  min-width: 0;
+}
+.layer-tail { display: flex; align-items: center; gap: 0.55rem; }
+.caret {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-3);
+  transition: transform 200ms var(--ease);
+}
+.layer[data-open='true'] .caret { transform: rotate(90deg); }
+
+/* The deterministic core is promoted: it is the differentiator, and the one
+   place where colour carries architectural meaning rather than status. */
+.layer.core {
+  border-color: rgb(52 211 153 / 0.45);
+  background: linear-gradient(90deg, rgb(52 211 153 / 0.07), rgb(52 211 153 / 0.015) 60%, transparent);
+}
+.layer.core:hover { border-color: rgb(52 211 153 / 0.7); }
+.layer.core .layer-n { color: var(--jade); }
+.layer.core .layer-name { color: var(--ink-0); }
+
+.layer-body {
+  display: none;
+  padding: 0 0.9rem 0.9rem 5.4rem;
+  border-top: 1px solid var(--hairline);
+  margin-top: -1px;
+  padding-top: 0.85rem;
+}
+.layer[data-open='true'] .layer-body { display: block; }
+@media (max-width: 620px) {
+  .layer-btn { grid-template-columns: 1.75rem minmax(0, 1fr) auto; }
+  .layer-sub { display: none; }
+  .layer-body { padding-left: 0.9rem; }
+}
+
+.layer-body p {
+  margin: 0 0 0.7rem;
+  font-size: 0.8125rem;
+  color: var(--ink-1);
+  max-width: 68ch;
+}
+.layer-body p:last-child { margin-bottom: 0; }
+.layer-body strong { color: var(--ink-0); font-weight: 600; }
+
+.mods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+.mods li {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--ink-1);
+  background: var(--abyss-3);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  padding: 0.16rem 0.42rem;
+}
+.mods li.dim { color: var(--ink-3); border-style: dashed; }
+
+.note {
+  border-left: 2px solid var(--hairline-strong);
+  padding: 0.1rem 0 0.1rem 0.8rem;
+  font-size: 0.8125rem;
+  color: var(--ink-1);
+  max-width: 68ch;
+}
+.note.veto  { border-left-color: var(--red); }
+.note.warn  { border-left-color: var(--amber); }
+.note.good  { border-left-color: var(--jade); }
+.note b { color: var(--ink-0); }
+
+/* --- aside -------------------------------------------------------------- */
+.aside { display: flex; flex-direction: column; gap: 0.75rem; position: sticky; top: 4.5rem; }
+@media (max-width: 1020px) { .aside { position: static; } }
+
+.card {
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--abyss-1);
+  padding: 0.85rem 0.9rem;
+}
+.card h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.rows { display: flex; flex-direction: column; gap: 0.42rem; }
+.row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.75rem;
+}
+.row .k {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.row .v { color: var(--ink-1); }
+
+.k.live   { color: var(--live); }
+.k.cached { color: var(--ink-1); }
+.k.curated{ color: var(--cyan); }
+.k.derived{ color: var(--violet); }
+.k.sim    { color: var(--amber); }
+.k.unav   { color: var(--red); }
+.k.go     { color: var(--jade); }
+.k.caution{ color: var(--amber); }
+.k.nogo   { color: var(--red); }
+.k.unver  { color: var(--ink-1); }
+
+/* ======================================================== JOURNEY STRIPS = */
+.journeys { display: flex; flex-direction: column; gap: 1.5rem; }
+.journey {
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--abyss-1);
+  overflow: hidden;
+}
+.journey-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.7rem 0.95rem;
+  border-bottom: 1px solid var(--hairline);
+  flex-wrap: wrap;
+}
+.journey-head h3 { margin: 0; font-size: 0.875rem; font-weight: 600; }
+.journey-head .q {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--cyan);
+}
+.journey-head .t {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--ink-2);
+}
+/* A grid that wraps, not a strip that scrolls. Journey 2 has seven steps, and
+   at a fixed basis the seventh sat behind a horizontal scrollbar — which a
+   presenter on a projector will never find and an audience cannot see at all.
+   Wrapping still reads as a sequence, and the 1px gap over a hairline ground
+   gives clean separators in both directions without per-edge border rules. */
+.steps {
+  display: grid;
+  /* One row per journey, with the column count set per journey rather than by
+     auto-fit. auto-fit sized every track to a minimum and then orphaned the
+     seventh step of journey 2 alone on a second row beside five empty tracks —
+     a pipeline that wraps unevenly stops reading as a pipeline. */
+  grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
+  gap: 1px;
+  background: var(--hairline);
+}
+@media (max-width: 1100px) { .steps { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px)  { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px)  { .steps { grid-template-columns: 1fr; } }
+.step {
+  padding: 0.8rem 0.95rem 0.9rem;
+  background: var(--abyss-1);
+  min-width: 0;
+}
+.step .n {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+}
+.step h4 {
+  margin: 0.25rem 0 0.3rem;
+  font-size: 0.78125rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+.step p {
+  margin: 0;
+  font-size: 0.71875rem;
+  line-height: 1.5;
+  color: var(--ink-1);
+}
+.step.decisive { background: color-mix(in srgb, var(--abyss-1), var(--jade) 7%); }
+.step.decisive h4 { color: var(--jade); }
+.step.refusal { background: color-mix(in srgb, var(--abyss-1), var(--red) 7%); }
+.step.refusal h4 { color: var(--red); }
+
+/* ============================================================== ROADMAP == */
+.roadmap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15.5rem, 1fr));
+  gap: 0.6rem;
+}
+.rm {
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--abyss-1);
+  padding: 0.75rem 0.85rem;
+}
+.rm-top { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+.rm h4 { margin: 0; font-size: 0.78125rem; font-weight: 600; }
+.rm p { margin: 0; font-size: 0.71875rem; line-height: 1.5; color: var(--ink-1); }
+.rm.next { border-color: rgb(245 158 11 / 0.4); background: rgb(245 158 11 / 0.05); }
+
+/* =============================================================== FOOTER == */
+.foot {
+  margin-top: clamp(3rem, 7vw, 5rem);
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--hairline-strong);
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.foot p { margin: 0; font-size: 0.8125rem; color: var(--ink-1); max-width: 66ch; }
+.foot .disc {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+  border-left: 2px solid var(--amber);
+  padding-left: 0.8rem;
+  max-width: 40ch;
+}
+
+.controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.ctl {
+  all: unset;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-1);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 3px;
+  padding: 0.28rem 0.6rem;
+  cursor: pointer;
+  transition: color 140ms var(--ease), border-color 140ms var(--ease), background 140ms var(--ease);
+}
+.ctl:hover { color: var(--cyan); border-color: rgb(34 211 238 / 0.5); background: rgb(34 211 238 / 0.07); }
+.ctl:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <span class="wordmark">ORCA</span>
+    <span class="strap">Marine EcOsystem Reasoning with Collaborative Agents — agentic marine decision support for the Indian Exclusive Economic Zone</span>
+    <div class="counts">
+      <span><b>9</b> layers</span>
+      <span><b>47</b> endpoints</span>
+      <span><b>8</b> agent tools</span>
+      <span><b>11</b> languages</span>
+      <span><b>312</b> tests</span>
+    </div>
+  </div>
+</header>
+
+<main class="shell">
+
+  <!-- ============================================================== HERO -->
+  <section class="hero">
+    <div>
+      <div class="eyebrow">System design · end to end</div>
+      <h1>Data rises. Requests descend. <em>The verdict sits in the middle, and the AI cannot reach it.</em></h1>
+    </div>
+    <div class="thesis">
+      <p style="margin:0 0 0.6rem">
+        A language model is excellent at understanding a badly-phrased question in Tamil
+        and writing a clear answer. It is also capable of confidently writing
+        <b>“conditions look fine”</b> over a 2.6&nbsp;m sea when the boat's limit is
+        1.5&nbsp;m.
+      </p>
+      <p style="margin:0">
+        So ORCA separates <b>deciding</b> from <b>explaining</b> and puts a wall between
+        them. Everything else in this diagram follows from that one decision.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================= SPINE -->
+  <section class="sec" id="spine">
+    <div class="sec-head">
+      <h2>The nine layers</h2>
+      <p>Each layer talks only to its neighbours, which is what makes any one of them replaceable. Click a layer to open it.</p>
+    </div>
+
+    <div class="controls">
+      <button class="ctl" data-action="expand">Expand all</button>
+      <button class="ctl" data-action="collapse">Collapse all</button>
+    </div>
+
+    <div class="spine">
+
+      <!-- flow gutter -->
+      <div class="gutter" aria-hidden="true">
+        <span class="cap down">↓ request</span>
+        <div class="rails">
+          <div class="rail down"></div>
+          <div class="rail up"></div>
+        </div>
+        <span class="cap up">data ↑</span>
+      </div>
+
+      <!-- layers, 9 down to 1 -->
+      <div class="layers">
+
+        <article class="layer" data-open="false">
+          <button class="layer-btn" aria-expanded="false">
+            <span class="layer-n">9</span>
+            <span class="layer-name">Presentation</span>
+            <span class="layer-sub">Globe, panels, 3D sea, voice — in the browser</span>
+            <span class="layer-tail"><span class="chip built">built</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods">
+              <li>MapLibre globe</li><li>deck.gl overlay</li><li>VerdictCard</li><li>EvidencePanel</li>
+              <li>FreshnessStrip</li><li>ChatPanel + trace</li><li>LayerRail</li><li>VoiceBar</li>
+              <li>SeaState (3D)</li><li>GlobeIntro (3D)</li><li>RoutePanel</li><li>SarPanel</li>
+              <li>AlertRail</li><li>TreatmentRail</li>
+            </ul>
+            <p>A real spherical projection, not a flat rectangle, with data layers drawn straight onto the graphics hardware. Seven visual treatments sit behind a frame-rate guard that turns one <strong>off</strong> when the machine cannot hold the budget, rather than displaying a number and doing nothing.</p>
+            <div class="note good"><b>The rule that shows the philosophy.</b> Layer legends are generated from the same lookup tables that colour the pixels, so a colour <em>means</em> a temperature. A visual treatment breaks that — so while one is active the legends hide themselves and say why. A legend that no longer matches the pixels is a specific false claim.</div>
+          </div>
+        </article>
+
+        <article class="layer" data-open="false">
+          <button class="layer-btn" aria-expanded="false">
+            <span class="layer-n">8</span>
+            <span class="layer-name">HTTP interface</span>
+            <span class="layer-sub">47 endpoints — the only way in or out</span>
+            <span class="layer-tail"><span class="chip built">built</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods">
+              <li>/forecast/point</li><li>/risk/assess</li><li>/agent/stream</li><li>/route/plan</li>
+              <li>/sar/drift</li><li>/alerts/stream</li><li>/language/listen</li><li>/language/speak</li>
+              <li>/advisories/cap</li><li>/rasters/*</li><li>/geofence/check</li><li>/freshness</li>
+            </ul>
+            <p>Two endpoints behave unusually, on purpose. <strong>The agent stream</strong> pushes reasoning in pieces with buffering disabled, compression off and a heartbeat, because a trace that arrives in one lump at the end proves nothing. <strong>The route planner returns success for a refusal</strong> — “no safe passage, and here are the six cells that block it” is a complete answer, not an error to retry.</p>
+          </div>
+        </article>
+
+        <article class="layer" data-open="false">
+          <button class="layer-btn" aria-expanded="false">
+            <span class="layer-n">7</span>
+            <span class="layer-name">Language plane</span>
+            <span class="layer-sub">11 languages · translate, speak, listen, and <em>verify</em></span>
+            <span class="layer-tail"><span class="chip built">built</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods">
+              <li>detect.py</li><li>translate.py</li><li>guard.py</li><li>speech.py</li>
+            </ul>
+            <p>English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Odia, Konkani. All eleven voices were verified by generating audio rather than trusting the documentation — which is how we found that Odia's documented voice is rejected by the live service and that Konkani has no native voice at all. ORCA marks the substitute rather than passing a Marathi voice off as Konkani.</p>
+            <div class="note veto"><b>Why the guard exists.</b> Asked to translate an advisory beginning “NO-GO”, the service returned Tamil meaning <em>“punishment for those who go astray”</em>. Asked to translate “wind = 14.7&nbsp;kn”, it returned <em>“14.7 kilometres”</em> — every digit intact, the quantity wrong. So numerals, verdict words, bearings and confusable units are masked, translated, re-injected verbatim, and verified as a <b>multiset</b>. A clause that cannot be verified stays in English rather than being translated unsafely.</div>
+          </div>
+        </article>
+
+        <article class="layer" data-open="false">
+          <button class="layer-btn" aria-expanded="false">
+            <span class="layer-n">6</span>
+            <span class="layer-name">Agent plane</span>
+            <span class="layer-sub">Decompose → plan → execute → report → criticise</span>
+            <span class="layer-tail"><span class="chip built">built</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods">
+              <li>graph.py (LangGraph)</li><li>multiquery.py</li><li>tools.py — 8 tools</li><li>prompts.py</li><li>llm.py — 4 providers</li>
+            </ul>
+            <p>Each tool publishes a machine-readable description of itself — what it answers, its resolution, its speed, its provenance, its cost — and the planner chooses from those. Selecting everything is treated as a wrong answer: it wastes time and shows no judgement. <strong>The plan is published before anything runs</strong>, which is what makes the trace checkable rather than a summary written afterwards.</p>
+            <p>Compound questions are split into labelled sub-questions, and the tools each label needs become a <strong>floor</strong> the planner may add to but not drop from — because without that it answered “is it safe?” and silently ignored “and where are the fish?”.</p>
+            <div class="note warn"><b>The critic can reject its own side's work.</b> If a draft softens a NO-GO or quotes a figure absent from the fetched data, it is sent back. The interface shows the round count: a rejection is displayed, not hidden.</div>
+          </div>
+        </article>
+
+        <article class="layer core" data-open="true">
+          <button class="layer-btn" aria-expanded="true">
+            <span class="layer-n">5</span>
+            <span class="layer-name">Deterministic core</span>
+            <span class="layer-sub">The verdict lives here. No language model, by construction.</span>
+            <span class="layer-tail"><span class="chip built">built</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods">
+              <li>risk_engine.py</li><li>thresholds.py — 5 boat classes</li><li>geofence.py</li><li>router.py — A*</li>
+              <li>drift.py — SAR</li><li>cap_builder.py</li><li>geo.py</li><li>monitor.py</li>
+            </ul>
+            <p>Four measurements weighted into one index out of 100 — <strong>wave 35%, wind 30%, lightning 20%, visibility 15%</strong> — judged against the limits for <em>your</em> boat class, versioned as <span class="mono">orca-thresholds-2026.08</span> and displayed on every verdict.</p>
+            <div class="note veto"><b>Then hard vetoes are checked separately, and they override the index.</b> If exceeding the wave limit were merely a heavy penalty, calm wind and clear visibility could out-vote it and produce a GO in a sea that would sink the boat. Weighted averages have no concept of “never”, so “never” is a separate mechanism that runs afterwards. The same reasoning appears in the router, where a forbidden cell is made <b>impassable</b> rather than expensive.</div>
+            <p style="margin-top:0.7rem">The wall against the AI is enforced four independent ways: the field recording who decided carries a type that can hold only <span class="mono">"rule_engine"</span>; an automated test forbids this folder from importing the agent folder at all; the critic checks the draft against the verdict; and the interface states it on screen with the thresholds version.</p>
+          </div>
+        </article>
+
+        <article class="layer" data-open="false">
+          <button class="layer-btn" aria-expanded="false">
+            <span class="layer-n">4</span>
+            <span class="layer-name">Science</span>
+            <span class="layer-sub">Pure maths on one grid — no network, no AI</span>
+            <span class="layer-tail"><span class="chip built">built</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods">
+              <li>grid.py — 800×500 @ 0.05°</li><li>fronts.py — Sobel · Canny · SIED</li><li>pfz.py</li><li>colormap.py</li><li>vectorfield.py</li>
+            </ul>
+            <p>One grid for the whole system: 60°E–100°E, 0°N–25°N at 0.05° — 400,000 cells about 5.5&nbsp;km across — so every layer can be compared cell by cell. Fishing zones are re-derived from satellite temperature and chlorophyll because <strong>INCOIS publishes its advisories as picture maps, and software cannot read a picture of a map.</strong></p>
+            <div class="note warn"><b>The convention trap.</b> Wind direction is where the wind comes <em>from</em>; current direction is where the water flows <em>to</em>. Opposite conventions for the same-looking number, and getting one backwards gives a field that looks perfectly plausible and points exactly the wrong way. Handled in one function that takes the convention as an argument — because writing the sign flip twice is how the two ended up agreeing when they should not have.</div>
+          </div>
+        </article>
+
+        <article class="layer" data-open="false">
+          <button class="layer-btn" aria-expanded="false">
+            <span class="layer-n">3</span>
+            <span class="layer-name">Source adapters</span>
+            <span class="layer-sub">Retry · circuit-break · cache · report health</span>
+            <span class="layer-tail"><span class="chip built">built</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods">
+              <li>open_meteo.py</li><li>erddap.py — INCOIS</li><li>marine_regions.py</li><li>tls.py</li><li>base.py</li>
+              <li class="dim">cmems.py</li><li class="dim">earthdata.py</li><li class="dim">ais.py</li><li class="dim">gfw.py</li>
+            </ul>
+            <p>ORCA owns no sensors, so a large part of the engineering is behaving well as a guest on other people's systems. A source being down returns a result <em>marked</em> as failed rather than crashing the request, and every success and failure feeds the “sources 6/7” readout — which is a measurement, not a decoration.</p>
+            <div class="note veto"><b>The worst bug in the project's history.</b> Ocean current speed was being read as metres per second while the service returned knots — a factor of two, silently, on a value that feeds routing and search-and-rescue drift. The rule that came out of it: <b>never assume a unit; read the one the response declares and convert — and if the conversion is not physically meaningful, mark the value UNAVAILABLE rather than passing it through with a hopeful label.</b></div>
+            <p style="margin-top:0.7rem">Dashed modules are unwritten. Credentials for Copernicus Marine, NASA Earthdata, AIS and Global Fishing Watch load and are reported as available capabilities — but <strong>nothing calls them today</strong>, and we state that rather than counting them as integrations.</p>
+          </div>
+        </article>
+
+        <article class="layer" data-open="false">
+          <button class="layer-btn" aria-expanded="false">
+            <span class="layer-n">2</span>
+            <span class="layer-name">Provenance contract</span>
+            <span class="layer-sub">Not a layer you pass through — a law that applies to all of them</span>
+            <span class="layer-tail"><span class="chip built">built</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods"><li>provenance.py</li></ul>
+            <p>No number travels through ORCA as a bare number. Every value carries its dataset, provider, unit, provenance state, when it was valid, whether that is stale <em>for its kind</em>, what it was derived from, and its citation. Two checks run at the moment a value is created, and a value that fails them is not created — the program raises an error instead of quietly carrying an unattributed number:</p>
+            <p style="margin-bottom:0.35rem">— A <strong>DERIVED</strong> value with no declared inputs is rejected. This is why the fishing-zone layer cannot be magic: it is structurally obliged to name its sources.</p>
+            <p>— An <strong>UNAVAILABLE</strong> value that nonetheless carries a number is rejected. “We could not get it” and “here is the figure” contradict each other, and the type refuses to hold both.</p>
+            <div class="note good"><b>The consequence.</b> Because UNAVAILABLE is a real state rather than an absence, ORCA has a fourth verdict: <b>UNVERIFIABLE</b> — “could not obtain enough data to judge; this is not the same as safe”, with the missing inputs named. Most systems do not have this verdict.</div>
+          </div>
+        </article>
+
+        <article class="layer" data-open="false">
+          <button class="layer-btn" aria-expanded="false">
+            <span class="layer-n">1</span>
+            <span class="layer-name">External sources</span>
+            <span class="layer-sub">6 integrated · 8 with credentials and no adapter</span>
+            <span class="layer-tail"><span class="chip partial">partial</span><span class="caret">▸</span></span>
+          </button>
+          <div class="layer-body">
+            <ul class="mods">
+              <li>Open-Meteo Marine</li><li>Open-Meteo Forecast</li><li>INCOIS ERDDAP</li><li>NASA GIBS</li>
+              <li>Marine Regions</li><li>Sarvam AI</li><li>Groq</li><li>Google Gemini</li><li>OpenRouter</li>
+              <li class="dim">IMD</li><li class="dim">MOSDAC</li><li class="dim">Bhashini</li>
+            </ul>
+            <p>Waves, period, direction, swell, sea temperature, currents, wind, gusts, visibility, rainfall, CAPE and CIN — plus Indian ocean products, boundary geometry and Earth imagery. Four language-model providers are tried in order, and if all four fail ORCA writes the answer from a fixed template: less fluent, equally correct, still cited.</p>
+            <div class="note good"><b>Two details worth knowing.</b> Open-Meteo's free tier is metered per <em>location</em>, not per request, so a 300-point query spends 300 of the allowance — ORCA meters itself on its own side rather than learning the limit by being refused. And INCOIS's certificate chain is incomplete: the lazy fix is to switch off encryption verification, so ORCA ships the missing intermediate certificate and completes the chain properly instead.</div>
+          </div>
+        </article>
+
+      </div>
+
+      <!-- aside -->
+      <aside class="aside">
+        <div class="card">
+          <h3>Six provenance states</h3>
+          <div class="rows">
+            <div class="row"><span class="k live">live</span><span class="v">fetched just now</span></div>
+            <div class="row"><span class="k cached">cached</span><span class="v">reused — show the age, not just the value</span></div>
+            <div class="row"><span class="k curated">curated</span><span class="v">reference geometry and cited limits; does not go stale like a forecast</span></div>
+            <div class="row"><span class="k derived">derived</span><span class="v">computed by ORCA — <em>must</em> name its inputs</span></div>
+            <div class="row"><span class="k sim">simulated</span><span class="v">demo data. Hatched, and barred from safety decisions</span></div>
+            <div class="row"><span class="k unav">unavailable</span><span class="v">tried and failed. Stops a gap reading as good news</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Four verdicts</h3>
+          <div class="rows">
+            <div class="row"><span class="k go">go</span><span class="v">within your class's limits</span></div>
+            <div class="row"><span class="k caution">caution</span><span class="v">inside limits, thin margin</span></div>
+            <div class="row"><span class="k nogo">no-go</span><span class="v">a hard limit is exceeded — overrides the index</span></div>
+            <div class="row"><span class="k unver">unverifiable</span><span class="v">not enough data to judge. <em>Not the same as safe.</em></span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Five boat classes</h3>
+          <div class="rows" style="font-family:var(--mono);font-size:0.6875rem">
+            <div class="row" style="grid-template-columns:1fr auto"><span class="v">Traditional non-motorised</span><span>Hs 1.0 m · 15 kn</span></div>
+            <div class="row" style="grid-template-columns:1fr auto"><span class="v">Motorised FRP 7–10 m</span><span>Hs 1.5 m · 22 kn</span></div>
+            <div class="row" style="grid-template-columns:1fr auto"><span class="v">Mechanised 10–15 m</span><span>Hs 2.0 m · 28 kn</span></div>
+            <div class="row" style="grid-template-columns:1fr auto"><span class="v">Trawler 15–24 m</span><span>Hs 2.5 m · 33 kn</span></div>
+            <div class="row" style="grid-template-columns:1fr auto"><span class="v">Deep-sea over 24 m</span><span>Hs 3.5 m · 40 kn</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Runs on nothing</h3>
+          <p style="margin:0;font-size:0.78125rem;color:var(--ink-1)">
+            SQLite and an in-process cache by default. No Docker, no Postgres, no Redis, no
+            cloud account. PostGIS and Redis are optional upgrades detected at startup, and a
+            dead accelerator is a logged fallback rather than an outage — with tests asserting
+            it. The demo has to survive a judge's laptop.
+          </p>
+        </div>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- =========================================================== JOURNEYS -->
+  <section class="sec" id="journeys">
+    <div class="sec-head">
+      <h2>Three journeys through the spine</h2>
+      <p>The fastest way to understand a system is to follow one request all the way through.</p>
+    </div>
+
+    <div class="journeys">
+
+      <article class="journey">
+        <div class="journey-head">
+          <h3>Tap a point on the sea</h3>
+          <span class="q">layers 9 → 3 → 2 → 5 → 9</span>
+          <span class="t">≈ 1.5 s</span>
+        </div>
+        <div class="steps" style="--cols:6">
+          <div class="step">
+            <div class="n">01</div>
+            <h4>Both requests go together</h4>
+            <p>Conditions and verdict are fetched in one shot. Fetched separately they could disagree — and a verdict that contradicts the evidence below it is worse than no verdict.</p>
+          </div>
+          <div class="step">
+            <div class="n">02</div>
+            <h4>Two services, in parallel</h4>
+            <p>Waves and currents from a marine model; wind, visibility and thunderstorm energy from an atmospheric one. Asked simultaneously, because the delay is visible to the user.</p>
+          </div>
+          <div class="step">
+            <div class="n">03</div>
+            <h4>Each value is wrapped</h4>
+            <p>Source, declared unit, valid time, and whether that makes it stale for its kind. A value the service could not supply becomes UNAVAILABLE rather than silently vanishing.</p>
+          </div>
+          <div class="step decisive">
+            <div class="n">04</div>
+            <h4>The rule engine decides</h4>
+            <p>Boat length selects a class, the class supplies the limits, four measurements are scored and weighted, hard vetoes are checked separately. One of four verdicts, with the arithmetic recorded.</p>
+          </div>
+          <div class="step">
+            <div class="n">05</div>
+            <h4>Confidence, judged separately</h4>
+            <p>A missing measurement scores zero <em>and</em> forces low confidence — because “we could not measure the waves” and “the waves are calm” must never produce the same output.</p>
+          </div>
+          <div class="step">
+            <div class="n">06</div>
+            <h4>The verdict, and the receipt</h4>
+            <p>Every number with its provenance badge — including whether it is a <em>forecast</em> for a future hour rather than a stale reading. A value valid at 06:00 tomorrow is 14 h “old” by subtraction and perfectly current in fact.</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="journey">
+        <div class="journey-head">
+          <h3>Ask a compound question in Tamil, by voice</h3>
+          <span class="q">layers 9 → 7 → 6 → 5 → 7 → 9</span>
+          <span class="t">≈ 15 s, all of it visible</span>
+        </div>
+        <div class="steps" style="--cols:7">
+          <div class="step">
+            <div class="n">01</div>
+            <h4>Speak, and see the level move</h4>
+            <p>The meter is driven by the measured microphone signal, not an animation, so a muted mic visibly does nothing. Audio is converted in-browser to the 16 kHz mono the engines expect.</p>
+          </div>
+          <div class="step">
+            <div class="n">02</div>
+            <h4>ORCA shows what it heard</h4>
+            <p>It does not send it straight on. Recognition on a question containing a place name is the least reliable link in the chain, so the transcript is shown for correction — and the detected language is checked against the one selected.</p>
+          </div>
+          <div class="step">
+            <div class="n">03</div>
+            <h4>Split into two questions</h4>
+            <p>“Is it safe tomorrow?” and “where will I find fish?” are separated and labelled. The tools each label needs become a floor. You watch this happen.</p>
+          </div>
+          <div class="step">
+            <div class="n">04</div>
+            <h4>The plan, then the tools</h4>
+            <p>Five tools with the reason each was chosen — published <em>before</em> execution. Then each result lands with the real time it took.</p>
+          </div>
+          <div class="step decisive">
+            <div class="n">05</div>
+            <h4>Verdict, then prose</h4>
+            <p>The rule engine's answer is handed to the model as unchangeable. The model writes English covering both halves in the order asked. Then the critic rules on it.</p>
+          </div>
+          <div class="step">
+            <div class="n">06</div>
+            <h4>Translated clause by clause</h4>
+            <p>English appears immediately; Tamil follows as a separate delivery. Each clause is verified independently, and one that cannot be verified <em>stays in English</em>. The panel reports “figures intact · 18”.</p>
+          </div>
+          <div class="step">
+            <div class="n">07</div>
+            <h4>It speaks a summary</h4>
+            <p>The verdict and the reason that drove it. The full compound answer synthesised to 66 seconds of Tamil, and nobody listens to 66 seconds before launching a boat. Whole lines are dropped, never half a figure.</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="journey">
+        <div class="journey-head">
+          <h3>Plan a passage — including the refusal</h3>
+          <span class="q">layers 9 → 5 → 3 → 5 → 9</span>
+          <span class="t">≈ 3 s</span>
+        </div>
+        <div class="steps" style="--cols:5">
+          <div class="step">
+            <div class="n">01</div>
+            <h4>A corridor becomes a grid</h4>
+            <p>Cells about 28 km across. The cell count is capped by <em>how many questions ORCA may ask the weather service per minute</em> — not by an arbitrary number.</p>
+          </div>
+          <div class="step decisive">
+            <div class="n">02</div>
+            <h4>Every cell asks the same engine</h4>
+            <p>Not a simplified copy — the identical function that produced the on-screen verdict. The router carries no thresholds of its own, so there is exactly one definition of “unsafe”.</p>
+          </div>
+          <div class="step">
+            <div class="n">03</div>
+            <h4>Land is the model's own silence</h4>
+            <p>The marine service returns nothing for wave height over land. A cell with no wave height is one the wave model declines to answer for — which is exactly the set a boat must not cross, and more accurate than any coastline outline at this scale.</p>
+          </div>
+          <div class="step">
+            <div class="n">04</div>
+            <h4>A* over the costed grid</h4>
+            <p>Cost is distance × a penalty that grows with risk, squared so a slightly worse cell is barely avoided and a nearly-forbidden one is avoided hard. A test compares the result against exhaustive search — optimality is verified, not asserted.</p>
+          </div>
+          <div class="step refusal">
+            <div class="n">05</div>
+            <h4>Or: no route, and why</h4>
+            <p>ORCA names the specific cells that block it, with the reason for each. “No route found” alone is indistinguishable from a broken planner — and the refusal is the more convincing demonstration.</p>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============================================================ REFUSALS -->
+  <section class="sec" id="refusals">
+    <div class="sec-head">
+      <h2>What ORCA refuses to do</h2>
+      <p>These are decisions, not gaps, and they are as much a part of the architecture as anything above.</p>
+    </div>
+    <div class="roadmap">
+      <div class="rm">
+        <div class="rm-top"><h4>Issue warnings</h4></div>
+        <p>The IMD and INCOIS do that, with authority ORCA does not have. The machine-readable export is shaped to <em>feed</em> their systems — CAP 1.2, the format NDMA SACHET already publishes in.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><h4>Let the AI decide</h4></div>
+        <p>Enforced four separate ways so three can fail and the rule still holds. The model explains a verdict; it never issues or softens one.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><h4>Message anyone</h4></div>
+        <p>No SMS, no push, no email. ORCA has no authority to contact a fisherman, and a prototype that quietly acquires a notification channel is one that can spam a real person.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><h4>Guess where a missing person is</h4></div>
+        <p>A search area with a stated containment fraction — 50% and 95% — never a point. A search that concentrates on one point because software offered one is worse than no software.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><h4>Let simulated data touch a verdict</h4></div>
+        <p>Barred by the type system, drawn hatched, never silently mixed with live measurements.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><h4>Disable encryption to make a call work</h4></div>
+        <p>The one-line fix for INCOIS's incomplete certificate chain is to stop checking. ORCA ships the missing intermediate instead.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= ROADMAP -->
+  <section class="sec" id="roadmap">
+    <div class="sec-head">
+      <h2>Not built yet</h2>
+      <p>Stated by us rather than found by you. The highest-value item is first.</p>
+    </div>
+    <div class="roadmap">
+      <div class="rm next">
+        <div class="rm-top"><span class="chip later">next</span><h4>A CIN gate on the lightning veto</h4></div>
+        <p>Lightning is derived from CAPE because India has no free authoritative lightning feed. CAPE is <em>potential</em>, so in monsoon ORCA refuses almost the whole coast. High CAPE with strong convective inhibition means the atmosphere is capped and storms will not fire — ORCA already fetches CIN and does not yet use it. The most valuable unbuilt thing in the system.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><span class="chip partial">partial</span><h4>Persistence layer</h4></div>
+        <p>PostGIS is probed and the in-memory fallback works, but the repository layer is unwritten — so <strong>nothing survives a restart</strong>. Traces, alerts and watched positions all live in memory.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><span class="chip later">later</span><h4>Second-source adapters</h4></div>
+        <p>Copernicus Marine, NASA Earthdata, Sentinel Hub, AIS, Global Fishing Watch. Credentials load; adapters unwritten. They would give higher resolution, history, and a second independent source to cross-check against.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><span class="chip partial">partial</span><h4>Broader cross-validation</h4></div>
+        <p>ORCA already compares model against satellite sea temperature and says whether the sources agree, measured against combined uncertainty. It is the <em>only</em> pair cross-validated, and extending it needs the adapters above.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><span class="chip later">later</span><h4>Authority dashboard</h4></div>
+        <p>Today's console is single-vessel. A fisheries officer needs a fleet view: many boats, aggregate risk, who is in trouble. The data model supports it; the interface does not exist.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><span class="chip later">later</span><h4>Satellite overpass · SGP4</h4></div>
+        <p>“When will a satellite next photograph this water?” Needs the standard orbital propagator. The data adapter exists; the propagator and its panel do not.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><span class="chip later">later</span><h4>Multi-leg trip planner</h4></div>
+        <p>Single-leg routing works. “Leave at 04:00, fish here six hours, return before the wind builds” needs routing through time as well as space.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><span class="chip partial">partial</span><h4>Offline mode</h4></div>
+        <p>Layers, reference geography and Earth imagery are cached and work with no network. The graceful degradation is real; the banner telling you about it is not built.</p>
+      </div>
+      <div class="rm">
+        <div class="rm-top"><span class="chip later">later</span><h4>Langfuse observability</h4></div>
+        <p>Recording AI behaviour over time — which prompts are slow, how often the critic rejects a draft. Credentials configured and dormant. Matters for operating at scale, little for a demonstration.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>
+      <strong>The claim, in one sentence.</strong> ORCA answers a fisherman's question in
+      his own language and out loud, shows every number's source and age, computes the
+      go / no-go with a fixed rule engine the artificial intelligence is not permitted to
+      overrule, and says “I cannot tell” when it cannot — which is the only version of
+      this product that is safe to put in front of a real person.
+    </p>
+    <p class="disc">
+      ORCA supplements, never replaces, official IMD and INCOIS bulletins. Safety-of-life-<em>adjacent</em>
+      decision support, not a certified marine safety system. Real deployment needs validation
+      against historical incident data and sign-off from a maritime safety authority.
+    </p>
+  </footer>
+
+</main>
+
+<script>
+  // Progressive enhancement: the layers are readable with JS off — every body is
+  // in the document, and the closed state is a CSS default rather than removed
+  // content. This only adds the toggling.
+  const layers = Array.from(document.querySelectorAll('.layer'));
+
+  function setOpen(layer, open) {
+    layer.dataset.open = String(open);
+    layer.querySelector('.layer-btn').setAttribute('aria-expanded', String(open));
+  }
+
+  for (const layer of layers) {
+    const button = layer.querySelector('.layer-btn');
+    button.addEventListener('click', () => {
+      setOpen(layer, layer.dataset.open !== 'true');
+    });
+  }
+
+  for (const control of document.querySelectorAll('.ctl')) {
+    control.addEventListener('click', () => {
+      const open = control.dataset.action === 'expand';
+      for (const layer of layers) setOpen(layer, open);
+    });
+  }
+</script>
+
+</body>
+</html>
