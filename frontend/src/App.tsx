@@ -33,6 +33,8 @@ import type {
   Landmark,
   PointForecast,
   RiskResult,
+  DriftClass,
+  DriftPlan,
   RouteCell,
   RoutePlan,
   ThresholdTable,
@@ -45,6 +47,9 @@ import { ChatPanel } from '@/components/ChatPanel';
 import { useVoiceRoster } from '@/components/VoiceBar';
 import { SeaStatePanel } from '@/components/SeaStatePanel';
 import { RoutePanel } from '@/components/RoutePanel';
+import { SarPanel } from '@/components/SarPanel';
+import { AlertRail } from '@/components/AlertRail';
+import { useAlerts } from '@/hooks/useAlerts';
 import { GlobeIntro, markIntroSeen, shouldPlayIntro } from '@/scenes/GlobeIntro';
 import { TreatmentFilters } from '@/components/TreatmentFilters';
 import { TreatmentRail } from '@/components/TreatmentRail';
@@ -108,6 +113,51 @@ export default function App() {
     null,
   );
   const [pickingDestination, setPickingDestination] = useState(false);
+
+  // SAR mode. Kept beside the route state rather than inside the panel so the
+  // map layers can read it and the panel can be closed without losing a result
+  // that took two thousand particles to compute.
+  const [sarOpen, setSarOpen] = useState(false);
+  const [sarPlan, setSarPlan] = useState<DriftPlan | null>(null);
+  const [sarHours, setSarHours] = useState(6);
+  const [sarClass, setSarClass] = useState('PIW-VERTICAL');
+  const [sarClasses, setSarClasses] = useState<DriftClass[]>([]);
+
+  // Proactive alerts. The stream is opened once for the session, not per panel:
+  // it is the only channel where ORCA speaks first, and an alert that arrives
+  // while the rail is closed still has to be counted.
+  const alerts = useAlerts();
+  const [alertRailOpen, setAlertRailOpen] = useState(false);
+  const [watchId, setWatchId] = useState<string | null>(null);
+
+  // Keep the watch pointed at the vessel and position the console is showing.
+  // A watch that keeps judging the boat it was registered with produces alerts
+  // about a boat the user is no longer in.
+  useEffect(() => {
+    if (!watchId) return;
+    void alerts.retarget(watchId, {
+      lat: selection?.lat,
+      lon: selection?.lon,
+      loaM,
+    });
+    // `alerts` is a stable hook object; the dependency that matters is the trip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchId, loaM, selection?.lat, selection?.lon]);
+
+  useEffect(() => {
+    let live = true;
+    api
+      .sarClasses()
+      .then((payload) => {
+        if (live) setSarClasses(payload.classes);
+      })
+      .catch(() => {
+        /* the panel shows an empty selector rather than blocking the console */
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
   // Read once, at mount: reading it in render would restart the intro on every
   // re-render until the flag was written.
   const [intro, setIntro] = useState(shouldPlayIntro);
@@ -520,6 +570,64 @@ export default function App() {
       );
     }
 
+    // ---- the SAR search area --------------------------------------------
+    //
+    // Widest first, so the 50% ring composites visibly ON TOP of the 95% one
+    // instead of being buried under it. Filled at low alpha and stroked, because
+    // a fill alone over an SST raster is unreadable and a stroke alone does not
+    // read as an area to sweep.
+    if (sarPlan?.areas?.length) {
+      const ordered = [...sarPlan.areas].sort((a, b) => b.fraction - a.fraction);
+      for (const area of ordered) {
+        const tight = area.fraction <= 0.6;
+        out.push(
+          new GeoJsonLayer({
+            id: `sar-area-${area.fraction}`,
+            data: {
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [area.ring] },
+              properties: { fraction: area.fraction },
+            } as never,
+            filled: true,
+            stroked: true,
+            getFillColor: tight ? [232, 163, 61, 46] : [239, 68, 68, 30],
+            getLineColor: tight ? [232, 163, 61, 220] : [239, 68, 68, 200],
+            getLineWidth: 2,
+            lineWidthUnits: 'pixels',
+            pickable: false,
+          }),
+        );
+      }
+
+      out.push(
+        // The mean drift track. Dashed would be nicer but PathLayer has no dash
+        // support without an extension, and adding one for a hairline is not
+        // worth the bundle.
+        new PathLayer<{ path: [number, number][] }>({
+          id: 'sar-track',
+          data: [{ path: sarPlan.track }],
+          getPath: (d) => d.path,
+          getColor: [255, 214, 170, 190],
+          getWidth: 1.5,
+          widthUnits: 'pixels',
+          pickable: false,
+        }),
+        new ScatterplotLayer<{ position: [number, number] }>({
+          id: 'sar-lkp',
+          data: [{ position: sarPlan.last_known_position }],
+          getPosition: (d) => d.position,
+          getRadius: 6,
+          radiusUnits: 'pixels',
+          filled: false,
+          stroked: true,
+          getLineColor: [255, 255, 255, 235],
+          getLineWidth: 2,
+          lineWidthUnits: 'pixels',
+          pickable: false,
+        }),
+      );
+    }
+
     // ---- the planned passage -------------------------------------------
     //
     // Three layers, in this order, because each one answers a different
@@ -665,6 +773,7 @@ export default function App() {
     selection,
     routePlan,
     routeDestination,
+    sarPlan,
     risk?.verdict,
     query,
     rasters,
@@ -906,6 +1015,74 @@ export default function App() {
           </div>
         )}
 
+        {/* ---------------- top left of the map: alerts ---------------- */}
+        <div className="pointer-events-none absolute top-3 left-[41rem] z-30 flex flex-col items-start">
+          <AlertRail
+            alerts={alerts.alerts}
+            status={alerts.status}
+            connected={alerts.connected}
+            unseen={alerts.unseen}
+            onOpen={alerts.markAllSeen}
+            onAcknowledge={(id) => void alerts.acknowledge(id)}
+            onCheckNow={alerts.checkNow}
+            canWatch={Boolean(selection)}
+            watching={Boolean(watchId)}
+            onWatchToggle={() => {
+              if (watchId) {
+                void alerts.unwatch(watchId);
+                setWatchId(null);
+                return;
+              }
+              if (!selection) return;
+              void alerts
+                .watch({
+                  lat: selection.lat,
+                  lon: selection.lon,
+                  loaM,
+                  label: selection.label,
+                })
+                .then(setWatchId)
+                .catch(() => setWatchId(null));
+            }}
+            open={alertRailOpen}
+            onToggle={setAlertRailOpen}
+          />
+        </div>
+
+        {/* ---------------- top right of the map: SAR mode ---------------- */}
+        <div className="pointer-events-none absolute top-3 right-[25.5rem] z-20 flex flex-col items-end gap-2">
+          <SarPanel
+            origin={selection}
+            hours={sarHours}
+            onHours={setSarHours}
+            objectClass={sarClass}
+            onObjectClass={setSarClass}
+            classes={sarClasses}
+            plan={sarPlan}
+            onPlan={(next) => {
+              setSarPlan(next);
+              // Frame the search area. A 2000 km² area is about a 25 km radius,
+              // which at EEZ zoom is ten pixels — computing it and then not
+              // showing it is the same as not computing it. Padded generously so
+              // the ring is not flush against the panel edges.
+              const ring = next?.areas?.[next.areas.length - 1]?.ring;
+              if (ring?.length) {
+                const lons = ring.map((p) => p[0]);
+                const lats = ring.map((p) => p[1]);
+                const pad = 0.25;
+                mapRef.current?.flyToBox(
+                  Math.min(...lons) - pad,
+                  Math.min(...lats) - pad,
+                  Math.max(...lons) + pad,
+                  Math.max(...lats) + pad,
+                );
+              }
+            }}
+            open={sarOpen}
+            onToggle={setSarOpen}
+          />
+        </div>
+
         {/* ---------------- top centre: visual treatments ---------------- */}
         <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2">
           <TreatmentRail
@@ -957,7 +1134,12 @@ export default function App() {
         {/* ---------------- empty state ---------------- */}
         {!selection && !loading && (
           <div className="pointer-events-none absolute inset-y-0 right-[25rem] left-[41.5rem] z-10 flex items-center justify-center">
-            <div className="glass pointer-events-auto max-w-md rounded-lg p-5 text-center">
+            {/* `pointer-events-none`, deliberately. The card says "click anywhere
+                on the sea" and then, being `pointer-events-auto`, swallowed every
+                click in the middle of the map — a user following the instruction
+                literally got nothing back. There is nothing interactive on it, so
+                it has no business intercepting anything. */}
+            <div className="glass pointer-events-none max-w-md rounded-lg p-5 text-center">
               <Crosshair className="text-cyan mx-auto mb-3 h-6 w-6" aria-hidden />
               <h1 className="text-ink-0 mb-1.5 text-base font-semibold">
                 Click anywhere on the sea

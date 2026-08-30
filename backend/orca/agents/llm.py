@@ -48,6 +48,16 @@ class LlmSpec:
     #: Requests per day we allow ourselves. ``None`` means unmetered.
     daily_budget: int | None = None
     supports_tools: bool = True
+    #: For reasoning models, how much of the token budget to spend thinking.
+    #:
+    #: This is not a quality dial, it is a correctness one. `openai/gpt-oss-120b`
+    #: emits its chain of thought into a separate `reasoning` field and charges it
+    #: against `max_tokens`. On a planner prompt carrying the full tool catalogue
+    #: it spent the entire 700-token budget reasoning and returned an EMPTY
+    #: `content` — which surfaced as "provider returned an empty completion" and
+    #: looked like an outage. At "low" the same call reasons in 92 characters and
+    #: returns 564 of answer.
+    reasoning_effort: str | None = None
     notes: str = ""
 
 
@@ -58,11 +68,19 @@ PROVIDERS: tuple[LlmSpec, ...] = (
         model="openai/gpt-oss-120b",
         base_url="https://api.groq.com/openai/v1/chat/completions",
         key_attr="groq_api_key",
-        notes="Primary. Verified available, fast, tool-calling.",
+        reasoning_effort="low",
+        notes=(
+            "Primary. Verified available, fast, tool-calling. A reasoning model, so "
+            "`reasoning_effort` is set — see the field's note."
+        ),
     ),
     LlmSpec(
         name="gemini",
-        model="gemini-2.5-flash",
+        # `gemini-2.5-flash` returns 404 for keys issued after its retirement to
+        # new users: "no longer available to new users". `gemini-flash-latest` is
+        # the tracking alias but answered 503 under load during testing, so the
+        # concrete current model is pinned instead.
+        model="gemini-3-flash-preview",
         base_url="https://generativelanguage.googleapis.com/v1beta/models",
         key_attr="google_api_key",
         auth="x-goog-api-key",
@@ -70,7 +88,10 @@ PROVIDERS: tuple[LlmSpec, ...] = (
     ),
     LlmSpec(
         name="openrouter",
-        model="meta-llama/llama-3.3-70b-instruct:free",
+        # The previous free Llama slug now 404s with "unavailable for free".
+        # Verified working on this key at the time of writing; free slugs on
+        # OpenRouter come and go, so /agent/providers reports which one answered.
+        model="nvidia/nemotron-3-super-120b-a12b:free",
         base_url="https://openrouter.ai/api/v1/chat/completions",
         key_attr="openrouter_api_key",
         daily_budget=45,  # free tier is 50/day; leave headroom for Q&A
@@ -155,14 +176,45 @@ def _headers(spec: LlmSpec) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}"}
 
 
+def _diagnose_empty(spec: LlmSpec, payload: dict[str, Any]) -> str:
+    """Explain an empty completion instead of just reporting one."""
+    try:
+        choice = (payload.get("choices") or [{}])[0]
+        finish = str(choice.get("finish_reason") or "unknown")
+        message = choice.get("message") or {}
+        reasoning = str(message.get("reasoning") or "")
+        usage = payload.get("usage") or {}
+        completion_tokens = usage.get("completion_tokens")
+    except (AttributeError, IndexError, TypeError):
+        return "provider returned an empty completion (and an unparseable response)"
+
+    if reasoning and finish == "length":
+        return (
+            f"{spec.name} spent its whole {completion_tokens}-token budget on reasoning and "
+            "returned no answer. Raise max_tokens or lower reasoning_effort — this is a budget "
+            "problem, not an outage."
+        )
+    if finish == "length":
+        return (
+            f"{spec.name} hit the token limit before producing any text "
+            f"(completion_tokens={completion_tokens})."
+        )
+    if finish in {"content_filter", "safety"}:
+        return f"{spec.name} refused the request (finish_reason={finish})."
+    return f"{spec.name} returned an empty completion (finish_reason={finish})."
+
+
 def _openai_body(spec: LlmSpec, messages: list[dict[str, Any]], **kw: Any) -> dict[str, Any]:
-    return {
+    body: dict[str, Any] = {
         "model": spec.model,
         "messages": messages,
         "temperature": kw.get("temperature", 0.2),
         "max_tokens": kw.get("max_tokens", 1400),
         "stream": kw.get("stream", False),
     }
+    if spec.reasoning_effort:
+        body["reasoning_effort"] = spec.reasoning_effort
+    return body
 
 
 def _gemini_body(messages: list[dict[str, Any]], **kw: Any) -> dict[str, Any]:
@@ -245,7 +297,12 @@ async def complete(
             payload = response.json()
             text, tokens_in, tokens_out = _extract(spec, payload)
             if not text.strip():
-                raise RuntimeError("provider returned an empty completion")
+                # Say WHY it is empty. A reasoning model that spent the whole
+                # budget thinking, and a provider that is actually down, both
+                # produce no text — and they need completely different fixes.
+                # The first version reported them identically and sent us looking
+                # for an outage that was not there.
+                raise RuntimeError(_diagnose_empty(spec, payload))
 
             latency_ms = (time.perf_counter() - started) * 1000
             registry.record_success(source, latency_ms=latency_ms)

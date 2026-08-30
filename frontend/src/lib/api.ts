@@ -21,6 +21,8 @@ import type {
   PfzNearest,
   PfzZonesResponse,
   PointForecast,
+  DriftClass,
+  DriftPlan,
   RasterCatalogue,
   RiskResult,
   RoutePlan,
@@ -139,6 +141,22 @@ export const api = {
         to_lon: args.toLon,
         loa_m: args.loaM,
         speed_kn: args.speedKn,
+      }),
+    }),
+
+  sarClasses: () =>
+    request<{ classes: DriftClass[]; current_field_error_ms: number; note: string }>(
+      '/sar/classes',
+    ),
+
+  sarDrift: (args: { lat: number; lon: number; hours: number; objectClass: string }) =>
+    request<DriftPlan>('/sar/drift', {
+      method: 'POST',
+      body: JSON.stringify({
+        lat: args.lat,
+        lon: args.lon,
+        hours: args.hours,
+        object_class: args.objectClass,
       }),
     }),
 

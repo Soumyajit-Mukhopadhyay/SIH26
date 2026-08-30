@@ -476,3 +476,69 @@ export interface RoutePlan {
   };
   generated_at: string;
 }
+
+/** One containment area from a drift simulation. */
+export interface DriftArea {
+  /** 0.5 or 0.95 — the fraction of particles inside the ring. */
+  fraction: number;
+  /** Closed ring of [lon, lat]. */
+  ring: [number, number][];
+  kept: number;
+  of: number;
+  centre: [number, number];
+  radius_km: number;
+  area_km2: number;
+}
+
+export interface DriftPlan {
+  drift_version: string;
+  hours: number;
+  object_class: {
+    code: string;
+    label: string;
+    downwind_leeway_pct_of_wind: number;
+    crosswind_leeway_pct_of_wind: number;
+    coefficient_spread: number;
+    note: string;
+  };
+  last_known_position: [number, number];
+  /** The centre of the distribution. NOT a predicted position, and the UI must
+   *  never present it as one. */
+  mean_position: [number, number];
+  displacement_km: number;
+  displacement_nm: number;
+  bearing_deg: number;
+  bearing: string;
+  track: [number, number][];
+  areas: DriftArea[];
+  spread_sources: {
+    current_field_error_ms: number;
+    current_field_error_km_1sigma: number;
+    leeway_coefficient_spread: number;
+    subgrid_eddy_ms: number;
+    /** Which term is actually setting the size of the area. */
+    dominant: string;
+  } | null;
+  diagnostics: {
+    steps: number;
+    step_minutes: number;
+    particles: number;
+    missing_fields: string[];
+    field_samples_taken: number;
+    warning?: string;
+  };
+  model: string;
+  not_modelled: string[];
+  disclaimer: string;
+  geojson: { type: 'FeatureCollection'; features: unknown[] };
+  generated_at: string;
+}
+
+export interface DriftClass {
+  code: string;
+  label: string;
+  downwind_leeway_pct_of_wind: number;
+  crosswind_leeway_pct_of_wind: number;
+  coefficient_spread: number;
+  note: string;
+}

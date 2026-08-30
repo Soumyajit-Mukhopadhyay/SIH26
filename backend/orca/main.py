@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from orca.api.routes import agent as agent_routes
+from orca.api.routes import alerts as alert_routes
 from orca.api.routes import forecast as forecast_routes
 from orca.api.routes import geofence as geofence_routes
 from orca.api.routes import health as health_routes
@@ -156,6 +157,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.infra["fences"] = fence_count
     app.state.infra["fence_note"] = fence_note
 
+    # The trip monitor. Started here so it lives exactly as long as the app, and
+    # stopped in the teardown below — an orphaned poll loop keeps hitting the
+    # upstream APIs after a reload and spends a metered budget on nothing.
+    from orca.jobs.monitor import monitor
+
+    monitor.start()
+    app.state.infra["monitor"] = monitor.status()
+
     caps = settings.capabilities()
     log.info(
         "ORCA %s starting — env=%s db=%s cache=%s queue=%s",
@@ -178,6 +187,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        # Stop the monitor before closing the HTTP client it polls through, or
+        # the last in-flight poll raises against a closed transport on the way out.
+        await monitor.stop()
+
         from orca.sources.base import close_client
 
         await close_client()
@@ -246,6 +259,7 @@ def create_app() -> FastAPI:
     app.include_router(imagery_routes.router)
     app.include_router(routing_routes.router)
     app.include_router(sar_routes.router)
+    app.include_router(alert_routes.router)
     app.include_router(language_routes.router)
     app.include_router(geofence_routes.router)
 
