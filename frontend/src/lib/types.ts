@@ -240,3 +240,104 @@ export type Treatment =
   | 'bathymetric'
   | 'crt'
   | 'noir';
+
+// ---------------------------------------------------------------- rasters
+
+export interface ColormapStop {
+  value: number;
+  rgba: [number, number, number, number];
+}
+
+export interface ColormapMeta {
+  kind: 'continuous' | 'categorical';
+  cmap?: string;
+  vmin?: number;
+  vmax?: number;
+  label?: string;
+  description?: string;
+  stops?: ColormapStop[];
+  classes?: { value: number; rgba: [number, number, number, number]; label: string }[];
+}
+
+export interface RasterStatistics {
+  valid_cells: number;
+  total_cells: number;
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+}
+
+export interface PfzDerivation {
+  detector: string;
+  inputs_used: string[];
+  inputs_missing: string[];
+  rank_cells: Record<string, number>;
+  max_rank: number;
+  zone_count: number;
+  method: string;
+  notes: string[];
+  front?: { detector: string; method: string; citation: string; front_cells: number };
+}
+
+export interface RasterVariable {
+  variable: string;
+  unit: string | null;
+  valid_time: string | null;
+  generated_at: string | null;
+  provenance: Provenance;
+  lineage: string[];
+  method: string | null;
+  /** deck.gl BitmapLayer bounds: [west, south, east, north]. */
+  bounds: [number, number, number, number] | null;
+  bytes: number;
+  colormap: ColormapMeta | null;
+  statistics: RasterStatistics | null;
+  png: string;
+  sidecar: string;
+  timesteps: string[];
+  /** Present on pfz_rank only. */
+  pfz?: PfzDerivation;
+}
+
+export interface RasterCatalogue {
+  generated_at: string;
+  variables: RasterVariable[];
+  grid: Record<string, number | string>;
+  h3_resolution: number;
+  refresh: { running: boolean; last: Record<string, unknown> | null };
+  hint?: string;
+}
+
+export interface PfzZone {
+  rank: number;
+  cells: number;
+  area_km2: number;
+  centroid: { lat: number; lon: number };
+  h3: string | null;
+  polygon: [number, number][];
+}
+
+export interface PfzZonesResponse {
+  valid_time: string | null;
+  provenance: Provenance;
+  lineage: string[];
+  method: string | null;
+  derivation: PfzDerivation;
+  zone_count: number;
+  zones: PfzZone[];
+  disclaimer: string;
+}
+
+export interface PfzNearest {
+  found: boolean;
+  detail?: string;
+  zone?: PfzZone;
+  distance_km?: number;
+  bearing_deg?: number;
+  compass?: string;
+  narrative?: string;
+  valid_time?: string;
+  provenance?: Provenance;
+  lineage?: string[];
+  method?: string;
+}

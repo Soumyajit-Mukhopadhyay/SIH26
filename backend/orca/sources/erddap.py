@@ -82,6 +82,13 @@ class GridDataset:
     #: Longitudes 0..360 rather than -180..180. Getting this wrong silently
     #: returns an empty grid, which the plan flags as a classic own-goal.
     lon_0_360: bool = False
+    #: Singleton axes between time and latitude that still need a subscript.
+    #: The VIIRS chlorophyll grid is [time][altitude][lat][lon], and omitting
+    #: `altitude` does not error — ERDDAP maps latitude onto the altitude axis
+    #: and returns "0.0 is greater than the axis maximum", which reads like a
+    #: bad bounding box rather than a missing dimension. Declared per dataset so
+    #: the failure cannot recur silently.
+    extra_axes: tuple[str, ...] = ()
     notes: str | None = None
 
     @property
@@ -117,19 +124,21 @@ DATASETS: dict[str, GridDataset] = {
         cadence_hours=24.0,
         notes="1 km multi-scale ultra-high-resolution SST. ORCA's live SST field.",
     ),
-    "viirs_chl_monthly": GridDataset(
-        dataset_id="erdVHNchlamday",
+    "esacci_chl_monthly": GridDataset(
+        dataset_id="pmlEsaCCI60OceanColorMonthly",
         server=NOAA_SERVER,
         provider=Provider.NOAA,
-        variables={"chla": "chlorophyll"},
+        variables={"chlor_a": "chlorophyll"},
         units={"chlorophyll": "mg m-3"},
-        title="VIIRS chlorophyll-a, Northeast Pacific + global, monthly",
+        title="ESA Ocean Colour CCI v6.0, chlorophyll-a, global, monthly (PML)",
         role=LIVE,
         coverage_end=None,
         cadence_hours=24.0 * 30,
         notes=(
-            "Monthly composite — the zero-auth chlorophyll fallback. CMEMS is the "
-            "primary for a current daily field."
+            "Global 4 km monthly composite, the zero-auth chlorophyll source. "
+            "Replaced erdVHNchlamday, which despite a promising name covers only "
+            "-180 to -110 degrees E (the Northeast Pacific) and cannot see the "
+            "Indian Ocean at all. CMEMS remains the primary for a daily field."
         ),
     ),
     # ------------------------------------------- INDIAN, CURRENT (the one)

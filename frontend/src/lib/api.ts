@@ -16,7 +16,10 @@ import type {
   FreshnessReport,
   Health,
   Landmark,
+  PfzNearest,
+  PfzZonesResponse,
   PointForecast,
+  RasterCatalogue,
   RiskResult,
   ThresholdTable,
 } from './types';
@@ -90,6 +93,18 @@ export const api = {
 
   forecastSeries: (lat: number, lon: number, days = 3) =>
     request<ForecastSeries>(`/forecast/series?${q({ lat, lon, days })}`),
+
+  rasterCatalogue: () => request<RasterCatalogue>('/rasters/catalogue'),
+
+  refreshRasters: (detector: 'sobel' | 'canny' | 'sied' = 'sobel') =>
+    request<{ status: string; detail: string }>(`/rasters/refresh?${q({ detector })}`, {
+      method: 'POST',
+    }),
+
+  pfzZones: (minRank = 1) => request<PfzZonesResponse>(`/pfz/zones?${q({ min_rank: minRank })}`),
+
+  pfzNearest: (lat: number, lon: number, minRank = 1) =>
+    request<PfzNearest>(`/pfz/nearest?${q({ lat, lon, min_rank: minRank })}`),
 
   assessRisk: (lat: number, lon: number, loaM: number, boatClassCode?: string) =>
     request<RiskResult>('/risk/assess', {

@@ -12,13 +12,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PathLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { BitmapLayer, PathLayer, PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
 import { Anchor, Crosshair, Loader2, MapPin, Ruler, Waves } from 'lucide-react';
 import { clsx } from 'clsx';
 import { api, ApiError } from '@/lib/api';
 import type {
   FreshnessReport,
+  PfzZonesResponse,
+  RasterCatalogue,
   Health,
   Landmark,
   PointForecast,
@@ -30,7 +32,9 @@ import { FreshnessStrip } from '@/components/FreshnessStrip';
 import { VerdictCard } from '@/components/VerdictCard';
 import { EvidencePanel } from '@/components/EvidencePanel';
 import { ChatPanel } from '@/components/ChatPanel';
+import { LayerRail } from '@/components/LayerRail';
 import { useAgentStream } from '@/hooks/useAgentStream';
+import { useRasterImages } from '@/hooks/useRasterImages';
 
 /**
  * The AOI outline as a densified ring.
@@ -73,6 +77,15 @@ export default function App() {
 
   const { run: agentRun, ask: askAgent, stop: stopAgent } = useAgentStream();
 
+  const [rasters, setRasters] = useState<RasterCatalogue | null>(null);
+  const [activeLayers, setActiveLayers] = useState<Set<string>>(new Set(['sst']));
+  const [layerOpacity, setLayerOpacity] = useState(0.75);
+  const [refreshing, setRefreshing] = useState(false);
+  const [pfz, setPfz] = useState<PfzZonesResponse | null>(null);
+  // Bumped after every ingest so the browser refetches `latest.png` instead of
+  // showing a cached image of the previous run.
+  const [rasterEpoch, setRasterEpoch] = useState(0);
+
   // ---- boot ----
   useEffect(() => {
     void (async () => {
@@ -89,7 +102,56 @@ export default function App() {
       if (h.status === 'rejected') {
         setError('Backend unreachable. Start it with scripts\\dev.ps1.');
       }
+      await loadRasters();
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadRasters = useCallback(async () => {
+    try {
+      const catalogue = await api.rasterCatalogue();
+      setRasters(catalogue);
+      // Bumped so the browser refetches `latest.png` rather than showing a
+      // cached image of the previous ingest under the same URL.
+      setRasterEpoch((n) => n + 1);
+      if (catalogue.variables.some((v) => v.variable === 'pfz_rank')) {
+        void api
+          .pfzZones(1)
+          .then(setPfz)
+          .catch(() => undefined);
+      }
+      return catalogue;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const refreshRasters = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await api.refreshRasters('sobel');
+      // The ingest runs in the background, so poll until the catalogue's
+      // generated_at actually moves rather than guessing at a fixed delay.
+      const before = rasters?.variables.find((v) => v.variable === 'sst')?.generated_at ?? null;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const next = await loadRasters();
+        const running = next?.refresh?.running ?? false;
+        const after = next?.variables.find((v) => v.variable === 'sst')?.generated_at ?? null;
+        if (!running && after !== before) break;
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadRasters, rasters]);
+
+  const toggleLayer = useCallback((variable: string) => {
+    setActiveLayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(variable)) next.delete(variable);
+      else next.add(variable);
+      return next;
+    });
   }, []);
 
   // The freshness strip is only honest if it keeps up with reality.
@@ -162,6 +224,15 @@ export default function App() {
     if (agentRun.final?.risk) setRisk(agentRun.final.risk);
   }, [agentRun.final]);
 
+  // Decode the PNGs ourselves; see hooks/useRasterImages for why deck.gl's own
+  // async image prop is not used here.
+  const rasterUrls = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const variable of rasters?.variables ?? []) out[variable.variable] = `/api${variable.png}`;
+    return out;
+  }, [rasters]);
+  const rasterImages = useRasterImages([...activeLayers], rasterUrls, rasterEpoch);
+
   // ---- layers ----
   const layers = useMemo<Layer[]>(() => {
     const out: Layer[] = [];
@@ -185,6 +256,46 @@ export default function App() {
         pickable: false,
       }),
     );
+
+    // Data rasters, drawn beneath everything else so markers and boundaries stay
+    // readable over them. Ordered so a derived layer sits above its source.
+    const ORDER = ['sst', 'chlorophyll', 'sst_gradient', 'pfz_rank'];
+    for (const variable of ORDER) {
+      if (!activeLayers.has(variable)) continue;
+      const meta = rasters?.variables.find((v) => v.variable === variable);
+      const bitmap = rasterImages.images[variable];
+      if (!meta?.bounds || !bitmap) continue;
+      out.push(
+        new BitmapLayer({
+          id: `raster-${variable}-${rasterEpoch}`,
+          // The server colour-mapped this, and the sidecar's bounds are handed
+          // straight through, so there is no chance to transpose them here.
+          image: bitmap,
+          bounds: meta.bounds,
+          opacity: layerOpacity,
+          pickable: false,
+        }),
+      );
+    }
+
+    // PFZ outlines on top of the rank raster: the fill shows extent, the outline
+    // makes an individual zone something you can point at.
+    if (activeLayers.has('pfz_rank') && pfz?.zones?.length) {
+      out.push(
+        new PolygonLayer<(typeof pfz.zones)[number]>({
+          id: 'pfz-zones',
+          data: pfz.zones.filter((z) => z.rank >= 2).slice(0, 60),
+          getPolygon: (d) => d.polygon,
+          stroked: true,
+          filled: false,
+          getLineColor: (d) => (d.rank === 3 ? [34, 211, 238, 255] : [34, 211, 238, 170]),
+          getLineWidth: (d) => (d.rank === 3 ? 2 : 1.2),
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 1,
+          pickable: true,
+        }),
+      );
+    }
 
     if (landmarks.length > 0) {
       out.push(
@@ -244,7 +355,18 @@ export default function App() {
     }
 
     return out;
-  }, [landmarks, selection, risk?.verdict, query]);
+  }, [
+    landmarks,
+    selection,
+    risk?.verdict,
+    query,
+    rasters,
+    activeLayers,
+    layerOpacity,
+    rasterEpoch,
+    pfz,
+    rasterImages.images,
+  ]);
 
   const activeClass = useMemo(
     () => thresholds?.classes.find((c) => loaM >= c.loa_range_m[0] && loaM < c.loa_range_m[1]),
@@ -264,7 +386,7 @@ export default function App() {
         />
 
         {/* ---------------- left rail: place and vessel ---------------- */}
-        <div className="pointer-events-none absolute top-3 left-3 z-20 flex w-64 flex-col gap-2">
+        <div className="pointer-events-none absolute top-3 bottom-3 left-3 z-20 flex w-64 flex-col gap-2 overflow-y-auto">
           <div className="glass pointer-events-auto rounded-lg">
             <div className="border-hairline flex items-center gap-1.5 border-b px-3 py-2">
               <MapPin className="text-cyan h-3.5 w-3.5" aria-hidden />
@@ -339,6 +461,18 @@ export default function App() {
                 </div>
               )}
             </div>
+          </div>
+
+          <div className="pointer-events-auto">
+            <LayerRail
+              catalogue={rasters}
+              active={activeLayers}
+              onToggle={toggleLayer}
+              onRefresh={() => void refreshRasters()}
+              refreshing={refreshing || (rasters?.refresh?.running ?? false)}
+              opacity={layerOpacity}
+              onOpacity={setLayerOpacity}
+            />
           </div>
         </div>
 

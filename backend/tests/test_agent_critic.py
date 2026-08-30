@@ -107,9 +107,7 @@ class TestCriticRejects:
 class TestCriticApproves:
     async def test_it_approves_a_correct_draft(self):
         result = await critic(
-            _state(
-                "**NO-GO** — wave height 2.64 m is over the 1.5 m limit for your 8.2 m boat."
-            )
+            _state("**NO-GO** — wave height 2.64 m is over the 1.5 m limit for your 8.2 m boat.")
         )
         assert result["critic_verdict"] == "approve"
         assert result["answer"].startswith("**NO-GO**")

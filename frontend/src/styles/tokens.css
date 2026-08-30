@@ -115,11 +115,17 @@
 }
 
 @layer components {
-  /* The only glass in the system. */
+  /* The only glass in the system.
+   *
+   * 94% rather than the 82% it started at: with a full-AOI SST raster underneath,
+   * a thermal ramp at 82% bled through and turned every panel orange. Glass is
+   * for depth, not for reading data through — and on an instrument panel
+   * legibility beats translucency every time. The blur still separates the panel
+   * from the map. */
   .glass {
-    background: color-mix(in oklab, var(--color-abyss-1) 82%, transparent);
-    backdrop-filter: blur(12px) saturate(1.2);
-    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    background: color-mix(in oklab, var(--color-abyss-1) 94%, transparent);
+    backdrop-filter: blur(16px) saturate(1.1);
+    -webkit-backdrop-filter: blur(16px) saturate(1.1);
     border: 1px solid var(--color-hairline);
   }
 

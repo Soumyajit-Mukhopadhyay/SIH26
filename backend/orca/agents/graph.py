@@ -612,9 +612,7 @@ async def run(
     #: since the dict crossing the two streams is not the same object.
     delivered: set[tuple[str, Any]] = set()
 
-    async for mode, chunk in compiled_graph().astream(
-        initial, stream_mode=["values", "custom"]
-    ):
+    async for mode, chunk in compiled_graph().astream(initial, stream_mode=["values", "custom"]):
         if mode == "custom":
             # Mid-node: a tool call or result, on the wire the instant it happens.
             delivered.add((str(chunk.get("type")), chunk.get("step_id")))

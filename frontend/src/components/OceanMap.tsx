@@ -58,6 +58,16 @@ export function OceanMap({
   const clickRef = useRef(onClick);
   clickRef.current = onClick;
 
+  // The current layers, held in a ref so the overlay can adopt them the moment
+  // it exists. Without this the two are ordering-dependent: the style is fetched
+  // and transformed before the map is constructed, so `map.on('load')` fires
+  // well after React has settled, the last setProps runs against a null overlay,
+  // and `layers` never changes again — deck ends up mounted with zero layers and
+  // renders nothing, silently. That is exactly the bug adding the basemap
+  // transform introduced.
+  const pendingLayers = useRef<Layer[]>(layers);
+  pendingLayers.current = layers;
+
   const [failed, setFailed] = useState<string | null>(null);
 
   useImperativeHandle(
@@ -149,9 +159,17 @@ export function OceanMap({
     });
 
     map.on('load', () => {
-      const overlay = new MapboxOverlay({ interleaved: true, layers: [] });
+      // Overlaid, NOT interleaved. Interleaved renders deck inside MapLibre's own
+      // pass, where the vector layers drew fine but a BitmapLayer never appeared
+      // even with a fully decoded ImageBitmap and no error anywhere. Overlaid
+      // composites deck's own canvas above the basemap and draws everything. The
+      // cost is terrain occlusion, which an ocean map has no use for.
+      const overlay = new MapboxOverlay({ interleaved: false, layers: [] });
       map.addControl(overlay as unknown as maplibregl.IControl);
       overlayRef.current = overlay;
+      // Adopt whatever layers exist right now, rather than waiting for the next
+      // change that may never come.
+      overlay.setProps({ layers: pendingLayers.current });
       onReady?.();
     });
 
