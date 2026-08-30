@@ -33,6 +33,8 @@ import type {
   Landmark,
   PointForecast,
   RiskResult,
+  RouteCell,
+  RoutePlan,
   ThresholdTable,
 } from '@/lib/types';
 import { AOI, HOME_VIEW, OceanMap, type OceanMapHandle } from '@/components/OceanMap';
@@ -42,6 +44,7 @@ import { EvidencePanel } from '@/components/EvidencePanel';
 import { ChatPanel } from '@/components/ChatPanel';
 import { useVoiceRoster } from '@/components/VoiceBar';
 import { SeaStatePanel } from '@/components/SeaStatePanel';
+import { RoutePanel } from '@/components/RoutePanel';
 import { GlobeIntro, markIntroSeen, shouldPlayIntro } from '@/scenes/GlobeIntro';
 import { LayerRail } from '@/components/LayerRail';
 import { BoundaryPanel } from '@/components/BoundaryPanel';
@@ -96,6 +99,11 @@ export default function App() {
   const [replyLanguage, setReplyLanguage] = useState('en');
   const [speakReply, setSpeakReply] = useState(true);
   const [seaViewOpen, setSeaViewOpen] = useState(false);
+  const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
+  const [routeDestination, setRouteDestination] = useState<{ lat: number; lon: number } | null>(
+    null,
+  );
+  const [pickingDestination, setPickingDestination] = useState(false);
   // Read once, at mount: reading it in render would restart the intro on every
   // re-render until the flag was written.
   const [intro, setIntro] = useState(shouldPlayIntro);
@@ -496,6 +504,109 @@ export default function App() {
       );
     }
 
+    // ---- the planned passage -------------------------------------------
+    //
+    // Three layers, in this order, because each one answers a different
+    // question: where does it go, where does it turn, and what did it avoid.
+    if (routePlan?.ok && routePlan.path && routePlan.path.length > 1) {
+      out.push(
+        // A wide dark casing under the line. Without it a cyan route over the
+        // orange SST raster is genuinely hard to follow, and a route you cannot
+        // trace is not a route.
+        new PathLayer<{ path: [number, number][] }>({
+          id: 'route-casing',
+          data: [{ path: routePlan.path }],
+          getPath: (d) => d.path,
+          getColor: [4, 12, 22, 220],
+          getWidth: 7,
+          widthUnits: 'pixels',
+          jointRounded: true,
+          capRounded: true,
+          pickable: false,
+        }),
+        new PathLayer<{ path: [number, number][] }>({
+          id: 'route-line',
+          data: [{ path: routePlan.path }],
+          getPath: (d) => d.path,
+          // Coloured by the WORST verdict on the route, not the mean: a passage
+          // that is GO for 90% of its length and CAUTION for one leg is a
+          // CAUTION passage, and the line should say so at a glance.
+          getColor:
+            routePlan.worst_verdict === 'GO'
+              ? [52, 211, 153, 255]
+              : routePlan.worst_verdict === 'CAUTION'
+                ? [232, 163, 61, 255]
+                : [148, 163, 184, 255],
+          getWidth: 3,
+          widthUnits: 'pixels',
+          jointRounded: true,
+          capRounded: true,
+          pickable: false,
+        }),
+      );
+
+      if (routePlan.waypoints?.length) {
+        out.push(
+          new ScatterplotLayer<RouteCell>({
+            id: 'route-waypoints',
+            data: routePlan.waypoints,
+            getPosition: (d) => [d.lon, d.lat],
+            getRadius: 4,
+            radiusUnits: 'pixels',
+            getFillColor: [4, 12, 22, 235],
+            getLineColor: [226, 240, 247, 235],
+            getLineWidth: 1.5,
+            lineWidthUnits: 'pixels',
+            stroked: true,
+            pickable: true,
+            onClick: ({ object }) => {
+              if (object) void query(object.lon, object.lat);
+            },
+          }),
+        );
+      }
+    }
+
+    // Cells the direct line would have crossed and the rule engine refused.
+    // Drawn on BOTH outcomes: on a route they justify the detour, and on a
+    // refusal they are the entire answer.
+    const refusedCells = (routePlan?.refused_on_direct_line ?? []).filter((c) => !c.passable);
+    if (refusedCells.length) {
+      out.push(
+        new ScatterplotLayer<RouteCell>({
+          id: 'route-refused',
+          data: refusedCells,
+          getPosition: (d) => [d.lon, d.lat],
+          getRadius: 7,
+          radiusUnits: 'pixels',
+          filled: false,
+          stroked: true,
+          getLineColor: [239, 68, 68, 220],
+          getLineWidth: 2,
+          lineWidthUnits: 'pixels',
+          pickable: true,
+        }),
+      );
+    }
+
+    if (routeDestination) {
+      out.push(
+        new ScatterplotLayer<{ lat: number; lon: number }>({
+          id: 'route-destination',
+          data: [routeDestination],
+          getPosition: (d) => [d.lon, d.lat],
+          getRadius: 7,
+          radiusUnits: 'pixels',
+          filled: false,
+          stroked: true,
+          getLineColor: [34, 211, 238, 235],
+          getLineWidth: 2,
+          lineWidthUnits: 'pixels',
+          pickable: false,
+        }),
+      );
+    }
+
     if (selection) {
       const colour: [number, number, number] =
         risk?.verdict === 'GO'
@@ -536,6 +647,8 @@ export default function App() {
   }, [
     landmarks,
     selection,
+    routePlan,
+    routeDestination,
     risk?.verdict,
     query,
     rasters,
@@ -576,7 +689,18 @@ export default function App() {
         <OceanMap
           ref={mapRef}
           layers={layers}
-          onClick={(lon, lat) => void query(lon, lat)}
+          onClick={(lon, lat) => {
+            // While picking a destination the click sets the endpoint and does
+            // NOT move the selection: re-running the point forecast would throw
+            // away the origin the user is planning from.
+            if (pickingDestination) {
+              setRouteDestination({ lat, lon });
+              setPickingDestination(false);
+              setRoutePlan(null);
+              return;
+            }
+            void query(lon, lat);
+          }}
           className="absolute inset-0"
         />
 
@@ -716,11 +840,27 @@ export default function App() {
           />
         </div>
 
-        {/* ------- bottom centre: the forecast as the sea it describes -------
+        {/* ------- bottom centre: passage planning, then the sea view ------- */}
+        {selection && (
+          <div className="pointer-events-none absolute bottom-3 left-[41rem] z-20 w-[22rem]">
+            <RoutePanel
+              origin={selection}
+              destination={routeDestination}
+              onPickDestination={() => setPickingDestination((value) => !value)}
+              pickingDestination={pickingDestination}
+              loaM={loaM}
+              speedKn={speed}
+              plan={routePlan}
+              onPlan={setRoutePlan}
+            />
+          </div>
+        )}
+
+        {/* ------- the forecast as the sea it describes -------
             Anchored bottom-left of the map area so it grows upward and never
             covers the verdict card, which stays the authority on the page. */}
         {selection && (
-          <div className="pointer-events-none absolute bottom-3 left-[41rem] z-20 flex flex-col items-start">
+          <div className="pointer-events-none absolute right-[25.5rem] bottom-3 z-20 flex flex-col items-end">
             <SeaStatePanel
               forecast={forecast}
               boatClass={activeClass}

@@ -28,12 +28,15 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from orca.agents.tools import TOOL_ORDER, ordered
+
 log = logging.getLogger(__name__)
 
 Intent = Literal[
     "safety",
     "forecast",
     "fishing",
+    "routing",
     "boundary",
     "provenance",
     "thresholds",
@@ -48,6 +51,10 @@ INTENT_TOOLS: dict[Intent, tuple[str, ...]] = {
     "forecast": ("fetch_forecast_window",),
     # The PFZ tool answers the question; satellite SST is context for it.
     "fishing": ("find_fishing_zones", "fetch_satellite_sst"),
+    # `plan_route` needs a destination, so the conditions tool goes with it: if no
+    # destination can be resolved the answer still has something to say about the
+    # water where the user actually is.
+    "routing": ("plan_route", "fetch_marine_conditions"),
     "boundary": ("fetch_marine_conditions",),
     "provenance": ("discover_datasets",),
     "thresholds": ("lookup_boat_thresholds",),
@@ -100,6 +107,26 @@ _HINTS: dict[Intent, tuple[str, ...]] = {
         "where should i fish",
         "machhli",
         "chepa",
+    ),
+    "routing": (
+        "route",
+        "routing",
+        "passage",
+        "way to",
+        "get to",
+        "reach",
+        "sail to",
+        "head to",
+        "heading to",
+        "cross to",
+        "crossing",
+        "how do i get",
+        "best way",
+        "vazhi",  # Tamil/Malayalam: way, route
+        "pogum vazhi",
+        "raasta",  # Hindi/Urdu: road, route
+        "kaise jaun",
+        "marg",  # Marathi/Hindi: route
     ),
     "boundary": (
         "border",
@@ -216,23 +243,10 @@ def _classify(text: str) -> Intent:
     return best if scores[best] > 0 else "other"
 
 
-#: Execution order. Conditions before the verdict, because ``assess_risk`` needs
-#: them — the same ordering constraint the planner prompt states.
-_TOOL_ORDER = (
-    "fetch_marine_conditions",
-    "fetch_forecast_window",
-    "fetch_satellite_sst",
-    "find_fishing_zones",
-    "lookup_boat_thresholds",
-    "assess_risk",
-    "discover_datasets",
-)
-
-
 def _collect_tools(parts: list[SubQuestion]) -> list[str]:
     """Union of the parts' tools, in execution order."""
     needed = {tool for part in parts for tool in part.tools}
-    return [tool for tool in _TOOL_ORDER if tool in needed]
+    return ordered(needed)
 
 
 def split_heuristic(question: str) -> Decomposition:
@@ -349,7 +363,7 @@ async def decompose(question: str) -> Decomposition:
     # The planner still narrows from here.
     merged = sorted(
         {*_collect_tools(parts), *fallback.tools},
-        key=lambda tool: _TOOL_ORDER.index(tool) if tool in _TOOL_ORDER else 99,
+        key=lambda tool: TOOL_ORDER.index(tool) if tool in TOOL_ORDER else 99,
     )
 
     return Decomposition(

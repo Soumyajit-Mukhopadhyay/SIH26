@@ -23,6 +23,7 @@ import type {
   PointForecast,
   RasterCatalogue,
   RiskResult,
+  RoutePlan,
   ThresholdTable,
 } from './types';
 
@@ -120,6 +121,26 @@ export const api = {
 
   capUrl: (lat: number, lon: number, loaM: number, translateTo?: string) =>
     `/api/advisories/cap?${q({ lat, lon, loa_m: loaM, translate_to: translateTo })}`,
+
+  planRoute: (args: {
+    fromLat: number;
+    fromLon: number;
+    toLat: number;
+    toLon: number;
+    loaM: number;
+    speedKn: number;
+  }) =>
+    request<RoutePlan>('/route/plan', {
+      method: 'POST',
+      body: JSON.stringify({
+        from_lat: args.fromLat,
+        from_lon: args.fromLon,
+        to_lat: args.toLat,
+        to_lon: args.toLon,
+        loa_m: args.loaM,
+        speed_kn: args.speedKn,
+      }),
+    }),
 
   rasterCatalogue: () => request<RasterCatalogue>('/rasters/catalogue'),
 

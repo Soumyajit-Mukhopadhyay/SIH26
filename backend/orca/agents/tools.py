@@ -296,6 +296,73 @@ async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
     )
 
 
+async def _plan_route(
+    lat: float,
+    lon: float,
+    to_lat: float | None = None,
+    to_lon: float | None = None,
+    loa_m: float = 8.2,
+    speed_kn: float = 8.0,
+    **_: Any,
+) -> ToolResult:
+    """Plan a passage the rule engine has cleared cell by cell.
+
+    Needs a destination, and says so rather than inventing one. An agent that
+    guesses a destination produces a confident route to somewhere nobody asked
+    about, which is worse than a request for clarification.
+    """
+    from orca.services.router import plan
+
+    if to_lat is None or to_lon is None:
+        return ToolResult(
+            ok=False,
+            tool="plan_route",
+            summary="no destination given",
+            error=(
+                "Routing needs a destination. Ask the user where they are heading, or offer to "
+                "assess the conditions at their current position instead."
+            ),
+        )
+
+    result = await plan(
+        start=(lat, lon),
+        goal=(float(to_lat), float(to_lon)),
+        loa_m=loa_m,
+        speed_kn=speed_kn,
+    )
+
+    if not result.get("ok"):
+        # A refusal is a successful answer to the question asked, so ok=True with
+        # the reason in the summary. Marking it ok=False would make the trace show
+        # a failed tool, and the planner would try to work around a tool that
+        # worked perfectly.
+        refused = result.get("refused_on_direct_line") or []
+        blockers = sorted(
+            {str(c.get("reason", "")).split(";")[0] for c in refused if c.get("reason")}
+        )
+        return ToolResult(
+            ok=True,
+            tool="plan_route",
+            summary=(
+                f"NO SAFE PASSAGE for a {result.get('boat_class')}: {result.get('reason')}"
+                + (f" Blocking cells: {'; '.join(blockers[:3])}." if blockers else "")
+            ),
+            data=result,
+        )
+
+    return ToolResult(
+        ok=True,
+        tool="plan_route",
+        summary=(
+            f"{result['distance_nm']} nm route, {result['duration_h']} h at {result['speed_kn']} kn "
+            f"({result['detour_pct']:+.0f}% vs the direct line), {result['worst_verdict']} "
+            f"throughout for a {result['boat_class']}. {result['why_this_route']}"
+            + (f" NOTE: {result['degraded']}" if result.get("degraded") else "")
+        ),
+        data=result,
+    )
+
+
 async def _list_datasets(**_: Any) -> ToolResult:
     """Data discovery: what ORCA can actually read, and how current each is.
 
@@ -436,6 +503,31 @@ TOOLS: dict[str, Tool] = {
         run=_find_fishing_zones,
         owner="ocean",
     ),
+    "plan_route": Tool(
+        name="plan_route",
+        description=(
+            "Plan a sea passage from the user's position to a destination, avoiding every cell "
+            "the deterministic rule engine vetoes for their vessel class. Requires `to_lat` and "
+            "`to_lon`. Returns waypoints, distance, duration and the detour against the direct "
+            "line — or, when no passage exists, the specific cells that block it. Use for any "
+            "question about getting somewhere, a route, a crossing or a passage."
+        ),
+        capability=Capability(
+            answers=("route", "passage", "crossing", "navigation", "how_do_i_get_there"),
+            resolution_deg=0.25,
+            latency_ms=2500,
+            provenance="derived",
+            cost=4,
+            coverage="anywhere in the Indian EEZ the wave model answers for",
+            notes=(
+                "Costs a lattice of live samples from two upstream APIs, so it is the most "
+                "expensive tool here. A vetoed cell is impassable rather than expensive, so a "
+                "refusal means no route exists — not that the planner gave up."
+            ),
+        ),
+        run=_plan_route,
+        owner="geospatial",
+    ),
     "discover_datasets": Tool(
         name="discover_datasets",
         description=(
@@ -456,6 +548,37 @@ TOOLS: dict[str, Tool] = {
         owner="data_discovery",
     ),
 }
+
+
+#: Tool execution order, defined ONCE.
+#:
+#: The ordering is a real constraint, not a preference: `assess_risk` needs
+#: conditions, so conditions run first whatever order the planner or the query
+#: decomposition proposed. `plan_route` comes after the verdict, so a route is
+#: read next to the reason it was given.
+#:
+#: This lives here because there were two copies — one in `graph`, one in
+#: `multiquery` — and adding `plan_route` to the first while missing the second
+#: silently dropped it from every decomposed question: the intent classified
+#: correctly, the tool existed, and the union filtered it straight back out. Both
+#: modules now import this, and the test below asserts it covers the catalogue.
+TOOL_ORDER: tuple[str, ...] = (
+    "fetch_marine_conditions",
+    "fetch_forecast_window",
+    "fetch_satellite_sst",
+    "find_fishing_zones",
+    "lookup_boat_thresholds",
+    "assess_risk",
+    "plan_route",
+    "discover_datasets",
+)
+
+
+def ordered(names: object) -> list[str]:
+    """The given tool names in execution order, unknown names last."""
+    wanted = set(names)  # type: ignore[arg-type]
+    known = [name for name in TOOL_ORDER if name in wanted]
+    return known + sorted(wanted - set(TOOL_ORDER))
 
 
 def catalogue() -> list[dict[str, Any]]:

@@ -415,3 +415,64 @@ export interface GeofenceCheck {
   provenance: Provenance;
   note: string;
 }
+
+/** One lattice cell on a planned route, with the verdict the engine gave it. */
+export interface RouteCell {
+  lat: number;
+  lon: number;
+  passable: boolean;
+  reason: string | null;
+  verdict: Verdict | null;
+  index: number | null;
+  wave_m: number | null;
+  wind_kn: number | null;
+}
+
+export interface RoutePlan {
+  ok: boolean;
+  router_version: string;
+  boat_class: string;
+  thresholds_version?: string | null;
+  lattice: {
+    step_deg: number;
+    coarsened: boolean;
+    nodes: number;
+    water_nodes: number;
+    passable_nodes: number;
+    vetoed_water_nodes: number;
+    note: string;
+  };
+  /** Set when a whole upstream variable was missing, so the route was costed on
+   *  less than the full picture. Governs how much any of it is worth. */
+  degraded: string | null;
+  /** Present only when `ok`. */
+  start_note?: string;
+  goal_note?: string;
+  waypoints?: RouteCell[];
+  /** [lon, lat] pairs — the full lattice path, for drawing. */
+  path?: [number, number][];
+  distance_nm?: number;
+  direct_nm?: number;
+  detour_pct?: number;
+  duration_h?: number;
+  speed_kn?: number;
+  worst_verdict?: Verdict;
+  worst_index?: number | null;
+  mean_index?: number | null;
+  why_this_route?: string;
+  disclaimer?: string;
+  /** Present on both outcomes: the cells a straight run would have crossed. */
+  refused_on_direct_line?: RouteCell[];
+  /** Present only on a refusal. */
+  reason?: string;
+  direct_line?: RouteCell[];
+  what_would_change_it?: string[];
+  blocked_by?: string[];
+  requested: {
+    from: [number, number];
+    to: [number, number];
+    speed_kn: number;
+    boat_class: string;
+  };
+  generated_at: string;
+}

@@ -141,6 +141,16 @@ export function OceanMap({
 
     mapRef.current = map;
 
+    // Dev-only handle, so a browser test can click a real coordinate instead of
+    // guessing pixels. Under a globe projection the screen position of a
+    // latitude is not a linear function of the viewport, and hand-tuned pixel
+    // targets silently start landing on land — or on a modal — the moment the
+    // camera moves. `import.meta.env.DEV` is statically false in a production
+    // build, so Vite removes this entirely.
+    if (import.meta.env.DEV) {
+      (window as unknown as { __orcaMap?: MapLibreMap }).__orcaMap = map;
+    }
+
     map.on('style.load', () => {
       // Globe, for a 40-degree-wide AOI.
       map.setProjection({ type: 'globe' });

@@ -51,6 +51,9 @@ Hard requirements:
   context for the answer and not the answer.
 - If the question is about sea temperature or thermal fronts, include
   `fetch_satellite_sst`.
+- If the question is about GETTING SOMEWHERE — a route, a passage, a crossing,
+  "can I reach X" — include `plan_route`. It needs `to_lat`/`to_lon`; if the
+  question names no destination, do NOT select it.
 - If the question is about where the data comes from, include `discover_datasets`.
 
 Reply with ONLY a JSON object, no prose and no code fence:

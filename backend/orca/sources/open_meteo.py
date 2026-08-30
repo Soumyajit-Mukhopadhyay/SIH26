@@ -563,6 +563,188 @@ async def sample_vectors(
     return out
 
 
+#: What the router needs at every lattice node, and where each field comes from.
+#: Split across the two APIs on purpose — waves are marine, wind and convection
+#: are atmospheric — so this is two batched requests, not one.
+ROUTING_FIELDS: dict[str, tuple[str, str]] = {
+    "wave_height": ("marine", "wave_height"),
+    "wind_speed": ("forecast", "wind_speed_10m"),
+    "visibility": ("forecast", "visibility"),
+    "convective_energy": ("forecast", "cape"),
+}
+
+
+#: Per-point sample cache, keyed by rounded coordinate and variable.
+#:
+#: The models behind these fields update hourly, so a 20-minute TTL never serves
+#: anything the upstream would have changed. It exists for a specific failure the
+#: router exposed: two route requests in the same minute cost more than the
+#: per-minute budget allows, so the second one lost a whole batch and came back
+#: costed on wave height alone. During a demo the second request is the one
+#: someone asked for.
+_SAMPLE_TTL_S = 1200.0
+_sample_cache: dict[tuple[float, float, str], tuple[float, float | None]] = {}
+
+#: 4 decimal places is ~11 m, far finer than any model cell, so rounding cannot
+#: merge two genuinely different points.
+_CACHE_PRECISION = 4
+
+
+def _cache_get(lat: float, lon: float, variable: str) -> tuple[bool, float | None]:
+    """``(hit, value)``. A cached ``None`` is a hit: "the model has no value here"
+    is information, and re-asking for it every time is what would put the land
+    mask back on the wire."""
+    key = (round(lat, _CACHE_PRECISION), round(lon, _CACHE_PRECISION), variable)
+    entry = _sample_cache.get(key)
+    if entry is None:
+        return False, None
+    stored_at, value = entry
+    if time.monotonic() - stored_at > _SAMPLE_TTL_S:
+        del _sample_cache[key]
+        return False, None
+    return True, value
+
+
+def _cache_put(lat: float, lon: float, variable: str, value: float | None) -> None:
+    _sample_cache[(round(lat, _CACHE_PRECISION), round(lon, _CACHE_PRECISION), variable)] = (
+        time.monotonic(),
+        value,
+    )
+
+
+def sample_cache_status() -> dict[str, Any]:
+    now = time.monotonic()
+    live = sum(1 for stored_at, _ in _sample_cache.values() if now - stored_at <= _SAMPLE_TTL_S)
+    return {"entries": len(_sample_cache), "live": live, "ttl_s": _SAMPLE_TTL_S}
+
+
+async def sample_conditions(
+    lats: list[float],
+    lons: list[float],
+    *,
+    variables: tuple[str, ...] = tuple(ROUTING_FIELDS),
+    use_cache: bool = True,
+) -> list[dict[str, float | None]]:
+    """Sample scalar conditions at many points, in ORCA's canonical units.
+
+    Returns one dict per requested point, in the SAME ORDER, with ``None`` for
+    anything the upstream did not return. Order and length are guaranteed because
+    the caller indexes a routing lattice by position — silently dropping a point,
+    the way :func:`sample_vectors` does, would shift every node after the gap onto
+    the wrong cell.
+
+    **A ``None`` wave height is the land mask.** The Marine API returns null over
+    land, and that is a better land test than any coastline polygon we could ship:
+    it is exactly the set of cells the wave model itself declines to answer for,
+    which is exactly the set a router must not route through. It also means an
+    unroutable cell and an unmeasurable cell are the same thing, which is the
+    honest position.
+    """
+    if len(lats) != len(lons):
+        raise ValueError("lats and lons must be the same length")
+
+    wanted = [v for v in variables if v in ROUTING_FIELDS]
+    out: list[dict[str, float | None]] = [{v: None for v in wanted} for _ in lats]
+
+    by_api: dict[str, list[str]] = {}
+    for variable in wanted:
+        api, _ = ROUTING_FIELDS[variable]
+        by_api.setdefault(api, []).append(variable)
+
+    for api, group in by_api.items():
+        source: _OpenMeteoBase = marine if api == "marine" else forecast
+        remote = {ROUTING_FIELDS[v][1]: v for v in group}
+
+        # Serve what the cache has, then request only the rest. Positions are
+        # tracked explicitly because the results have to land back on the caller's
+        # original indices — a routing lattice is indexed by position.
+        pending: list[int] = []
+        for index, (lat, lon) in enumerate(zip(lats, lons, strict=True)):
+            hits = 0
+            for variable in group:
+                hit, value = _cache_get(lat, lon, variable) if use_cache else (False, None)
+                if hit:
+                    out[index][variable] = value
+                    hits += 1
+            if hits < len(group):
+                pending.append(index)
+
+        if not pending:
+            log.debug("%s sampling served entirely from cache (%d points)", api, len(lats))
+            continue
+
+        for start in range(0, len(pending), MAX_POINTS_PER_REQUEST):
+            batch = pending[start : start + MAX_POINTS_PER_REQUEST]
+            chunk_lats = [lats[k] for k in batch]
+            chunk_lons = [lons[k] for k in batch]
+
+            affordable, reason = budget.can_afford(len(chunk_lats))
+            if not affordable:
+                log.warning(
+                    "routing sample of %d uncached point(s) from %s skipped: %s",
+                    len(chunk_lats),
+                    api,
+                    reason,
+                )
+                continue
+
+            params: dict[str, Any] = {
+                "latitude": ",".join(f"{v:.4f}" for v in chunk_lats),
+                "longitude": ",".join(f"{v:.4f}" for v in chunk_lons),
+                "current": ",".join(remote),
+                "timezone": "UTC",
+                "cell_selection": source.cell_selection,
+            }
+            budget.charge(len(chunk_lats))
+            result = await source.fetch(source.url, params=params, conditional=False)
+            if not result.ok:
+                log.warning("routing sample batch (%s) failed: %s", api, result.error)
+                continue
+            try:
+                payload = result.json()
+            except ValueError as exc:
+                log.warning("routing sample batch (%s) unparseable: %s", api, exc)
+                continue
+
+            entries = payload if isinstance(payload, list) else [payload]
+            # Open-Meteo returns multi-location results in request order. Zipping
+            # by position is therefore correct, and it is also the only option: the
+            # echoed coordinates are the model cell's, not the requested point's,
+            # so matching on them drops every point that snapped to a neighbour.
+            for offset, entry in enumerate(entries):
+                if offset >= len(batch):
+                    break
+                index = batch[offset]
+                current = entry.get("current") or {}
+                units = entry.get("current_units") or {}
+                for remote_name, variable in remote.items():
+                    raw = current.get(remote_name)
+                    if raw is None:
+                        continue
+                    unit = normalise_unit(units.get(remote_name))
+                    converted = convert(float(raw), unit, UNITS[variable])
+                    if converted is None:
+                        log.error(
+                            "routing sample: cannot convert %s from %r to %s — dropping",
+                            variable,
+                            unit,
+                            UNITS[variable],
+                        )
+                        continue
+                    out[index][variable] = converted
+
+            # Cache after the batch, INCLUDING the Nones: "no wave height here" is
+            # the land mask, and it is stable.
+            for index in batch:
+                for variable in group:
+                    _cache_put(lats[index], lons[index], variable, out[index][variable])
+
+            if start + MAX_POINTS_PER_REQUEST < len(pending):
+                await asyncio.sleep(BATCH_PAUSE_S)
+
+    return out
+
+
 def sample_lattice(grid: Any, *, step_deg: float = 2.0) -> tuple[list[float], list[float]]:
     """A coarse lattice over a grid, for vector sampling.
 

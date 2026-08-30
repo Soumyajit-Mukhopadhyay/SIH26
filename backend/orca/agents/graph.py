@@ -43,24 +43,12 @@ from langgraph.graph import END, StateGraph
 from orca.agents import prompts
 from orca.agents.llm import LlmUnavailable, complete
 from orca.agents.multiquery import Decomposition, decompose
-from orca.agents.tools import catalogue, run_tool
+from orca.agents.tools import TOOL_ORDER, catalogue, run_tool
 from orca.provenance import Evidence, evidence_summary, utcnow
 
 log = logging.getLogger(__name__)
 
 MAX_CRITIC_ROUNDS = 2
-
-#: Tool execution order. `assess_risk` needs conditions, so conditions come
-#: first regardless of the order the planner or the decomposition proposed.
-_TOOL_ORDER = (
-    "fetch_marine_conditions",
-    "fetch_forecast_window",
-    "fetch_satellite_sst",
-    "find_fishing_zones",
-    "lookup_boat_thresholds",
-    "assess_risk",
-    "discover_datasets",
-)
 
 
 def _append(left: list[Any], right: list[Any]) -> list[Any]:
@@ -254,7 +242,7 @@ async def planner(state: OrcaState) -> OrcaState:
                     }
                 )
         # Re-establish the ordering constraint: conditions before the verdict.
-        order = {name: i for i, name in enumerate(_TOOL_ORDER)}
+        order = {name: i for i, name in enumerate(TOOL_ORDER)}
         plan.sort(key=lambda step: order.get(step["tool"], 99))
         for index, step in enumerate(plan):
             step["id"] = index + 1
