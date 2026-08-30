@@ -12,13 +12,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BitmapLayer, PathLayer, PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { BitmapLayer, GeoJsonLayer, PathLayer, PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
 import { Anchor, Crosshair, Loader2, MapPin, Ruler, Waves } from 'lucide-react';
 import { clsx } from 'clsx';
 import { api, ApiError } from '@/lib/api';
 import type {
+  FenceCollection,
   FreshnessReport,
+  GeofenceCheck,
   PfzZonesResponse,
   RasterCatalogue,
   Health,
@@ -33,6 +35,7 @@ import { VerdictCard } from '@/components/VerdictCard';
 import { EvidencePanel } from '@/components/EvidencePanel';
 import { ChatPanel } from '@/components/ChatPanel';
 import { LayerRail } from '@/components/LayerRail';
+import { BoundaryPanel } from '@/components/BoundaryPanel';
 import { useAgentStream } from '@/hooks/useAgentStream';
 import { useRasterImages } from '@/hooks/useRasterImages';
 
@@ -86,6 +89,12 @@ export default function App() {
   // showing a cached image of the previous run.
   const [rasterEpoch, setRasterEpoch] = useState(0);
 
+  const [fences, setFences] = useState<FenceCollection | null>(null);
+  const [geofence, setGeofence] = useState<GeofenceCheck | null>(null);
+  const [showFences, setShowFences] = useState(true);
+  const [heading, setHeading] = useState<number | null>(null);
+  const [speed, setSpeed] = useState(8.0);
+
   // ---- boot ----
   useEffect(() => {
     void (async () => {
@@ -103,6 +112,7 @@ export default function App() {
         setError('Backend unreachable. Start it with scripts\\dev.ps1.');
       }
       await loadRasters();
+      void api.fences(0.01).then(setFences).catch(() => undefined);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -178,6 +188,10 @@ export default function App() {
         ]);
         setForecast(pointForecast);
         setRisk(verdict);
+        void api
+          .geofenceCheck(lat, lon, heading ?? undefined, heading === null ? undefined : speed, geofence?.states ?? {})
+          .then(setGeofence)
+          .catch(() => setGeofence(null));
         void api.freshness().then(setFreshness).catch(() => undefined);
       } catch (cause) {
         const message =
@@ -193,7 +207,8 @@ export default function App() {
         setLoading(false);
       }
     },
-    [loaM],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [loaM, heading, speed],
   );
 
   // Re-run when the vessel changes: the same sea is a different verdict for a
@@ -202,6 +217,23 @@ export default function App() {
     if (selection) void query(selection.lon, selection.lat, selection.label, loaM);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaM]);
+
+  // A new heading changes time-to-cross but nothing else, so re-check the
+  // boundaries without re-fetching the forecast.
+  useEffect(() => {
+    if (!selection) return;
+    void api
+      .geofenceCheck(
+        selection.lat,
+        selection.lon,
+        heading ?? undefined,
+        heading === null ? undefined : speed,
+        geofence?.states ?? {},
+      )
+      .then(setGeofence)
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [heading, speed, selection]);
 
   // ---- the causal link ----
   // When the agent answers, the map moves to the bounding box the answer is
@@ -297,6 +329,69 @@ export default function App() {
       );
     }
 
+    // Maritime boundaries. The IMBL treaty lines get the emphasis, not the EEZ:
+    // crossing one is a legal and safety event, while the EEZ is context.
+    if (showFences && fences?.features?.length) {
+      out.push(
+        new GeoJsonLayer({
+          id: 'fences-eez',
+          data: {
+            ...fences,
+            features: fences.features.filter((f) => f.properties.kind !== 'imbl'),
+          } as never,
+          stroked: true,
+          filled: false,
+          getLineColor: [148, 168, 187, 90],
+          getLineWidth: 1,
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 1,
+          pickable: true,
+        }),
+        new GeoJsonLayer({
+          id: 'fences-imbl',
+          data: {
+            ...fences,
+            features: fences.features.filter((f) => f.properties.kind === 'imbl'),
+          } as never,
+          stroked: true,
+          filled: false,
+          getLineColor: [245, 158, 11, 220],
+          getLineWidth: 2,
+          lineWidthUnits: 'pixels',
+          lineWidthMinPixels: 1.5,
+          pickable: true,
+        }),
+      );
+    }
+
+    // The nearest point on each boundary in range, and the line to it. Showing
+    // WHERE the crossing would happen is more useful than a distance alone.
+    if (geofence?.proximities?.length && selection) {
+      const relevant = geofence.proximities.filter(
+        (p) => p.kind === 'imbl' && p.distance_km < 60,
+      );
+      if (relevant.length > 0) {
+        out.push(
+          new PathLayer<(typeof relevant)[number]>({
+            id: 'boundary-bearings',
+            data: relevant,
+            getPath: (d) => [
+              [selection.lon, selection.lat],
+              [d.nearest_point.lon, d.nearest_point.lat],
+            ],
+            getColor: (d) =>
+              d.time_to_cross_min !== null && d.time_to_cross_min < 60
+                ? [245, 158, 11, 200]
+                : [148, 168, 187, 110],
+            getWidth: 1.2,
+            widthUnits: 'pixels',
+            widthMinPixels: 1,
+            pickable: false,
+          }),
+        );
+      }
+    }
+
     if (landmarks.length > 0) {
       out.push(
         new ScatterplotLayer<Landmark>({
@@ -366,6 +461,9 @@ export default function App() {
     rasterEpoch,
     pfz,
     rasterImages.images,
+    fences,
+    showFences,
+    geofence,
   ]);
 
   const activeClass = useMemo(
@@ -461,6 +559,19 @@ export default function App() {
                 </div>
               )}
             </div>
+          </div>
+
+          <div className="pointer-events-auto">
+            <BoundaryPanel
+              check={geofence}
+              heading={heading}
+              speed={speed}
+              onHeading={setHeading}
+              onSpeed={setSpeed}
+              capUrl={selection ? api.capUrl(selection.lat, selection.lon, loaM, 'ta') : null}
+              visible={showFences}
+              onToggleVisible={() => setShowFences((v) => !v)}
+            />
           </div>
 
           <div className="pointer-events-auto">

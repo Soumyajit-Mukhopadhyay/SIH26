@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse
 
 from orca.api.routes import agent as agent_routes
 from orca.api.routes import forecast as forecast_routes
+from orca.api.routes import geofence as geofence_routes
 from orca.api.routes import health as health_routes
 from orca.api.routes import language as language_routes
 from orca.api.routes import rasters as raster_routes
@@ -131,6 +132,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "started_at": utcnow(),
     }
 
+    # The geofence index. Built once, from disk if cached (it is CURATED treaty
+    # geometry, so a cached edition is as correct as a fresh fetch) and never in
+    # the request path. A failure here must not stop the server: geofencing is
+    # one feature, and the risk engine and forecasts do not depend on it.
+    fence_count = 0
+    fence_note: str | None = None
+    try:
+        from orca.services.geofence import index as fence_index
+        from orca.sources.marine_regions import ensure_reference_geography
+
+        payload = await ensure_reference_geography()
+        fence_count = fence_index.load(payload)
+        if payload.get("error"):
+            fence_note = str(payload["error"])
+    except Exception as exc:  # noqa: BLE001
+        fence_note = f"{type(exc).__name__}: {exc}"
+        log.warning("geofence index unavailable: %s", fence_note)
+
+    app.state.infra["fences"] = fence_count
+    app.state.infra["fence_note"] = fence_note
+
     caps = settings.capabilities()
     log.info(
         "ORCA %s starting — env=%s db=%s cache=%s queue=%s",
@@ -219,6 +241,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_routes.router)
     app.include_router(raster_routes.router)
     app.include_router(language_routes.router)
+    app.include_router(geofence_routes.router)
 
     @app.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:

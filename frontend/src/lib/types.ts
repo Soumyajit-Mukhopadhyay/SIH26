@@ -341,3 +341,57 @@ export interface PfzNearest {
   lineage?: string[];
   method?: string;
 }
+
+// ---------------------------------------------------------------- geofence
+
+export interface FenceProperties {
+  key: string;
+  name: string;
+  kind: 'eez' | 'imbl' | 'eez_outer';
+  authority: string;
+  consequence: string;
+  length_km: number | null;
+}
+
+export interface FenceCollection {
+  type: 'FeatureCollection';
+  features: {
+    type: 'Feature';
+    geometry: { type: string; coordinates: unknown };
+    properties: FenceProperties;
+  }[];
+  provenance: Provenance;
+  citation: Citation;
+  simplified_deg: number;
+  note: string;
+}
+
+export interface Proximity {
+  fence: string;
+  name: string;
+  kind: string;
+  inside: boolean;
+  distance_km: number;
+  bearing_deg: number;
+  compass: string;
+  nearest_point: { lat: number; lon: number };
+  state: 'outside' | 'approaching' | 'crossed' | 'inside' | 'exited';
+  time_to_cross_min: number | null;
+  closing: boolean | null;
+  consequence: string;
+  authority: string;
+  narrative: string;
+}
+
+export interface GeofenceCheck {
+  position: { lat: number; lon: number };
+  heading_deg: number | null;
+  speed_kn: number | null;
+  generated_at: string;
+  fences_in_range: number;
+  proximities: Proximity[];
+  transitions: Proximity[];
+  states: Record<string, string>;
+  provenance: Provenance;
+  note: string;
+}

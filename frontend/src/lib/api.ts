@@ -12,6 +12,8 @@
 
 import type {
   DatasetRoster,
+  FenceCollection,
+  GeofenceCheck,
   ForecastSeries,
   FreshnessReport,
   Health,
@@ -93,6 +95,31 @@ export const api = {
 
   forecastSeries: (lat: number, lon: number, days = 3) =>
     request<ForecastSeries>(`/forecast/series?${q({ lat, lon, days })}`),
+
+  fences: (simplifyDeg = 0.01) =>
+    request<FenceCollection>(`/geofence/geojson?${q({ simplify_deg: simplifyDeg })}`),
+
+  geofenceCheck: (
+    lat: number,
+    lon: number,
+    headingDeg?: number,
+    speedKn?: number,
+    previous: Record<string, string> = {},
+  ) =>
+    request<GeofenceCheck>('/geofence/check', {
+      method: 'POST',
+      body: JSON.stringify({
+        lat,
+        lon,
+        heading_deg: headingDeg,
+        speed_kn: speedKn,
+        radius_km: 150,
+        previous,
+      }),
+    }),
+
+  capUrl: (lat: number, lon: number, loaM: number, translateTo?: string) =>
+    `/api/advisories/cap?${q({ lat, lon, loa_m: loaM, translate_to: translateTo })}`,
 
   rasterCatalogue: () => request<RasterCatalogue>('/rasters/catalogue'),
 
