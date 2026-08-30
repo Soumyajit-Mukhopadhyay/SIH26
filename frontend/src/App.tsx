@@ -42,6 +42,7 @@ import { EvidencePanel } from '@/components/EvidencePanel';
 import { ChatPanel } from '@/components/ChatPanel';
 import { useVoiceRoster } from '@/components/VoiceBar';
 import { SeaStatePanel } from '@/components/SeaStatePanel';
+import { GlobeIntro, markIntroSeen, shouldPlayIntro } from '@/scenes/GlobeIntro';
 import { LayerRail } from '@/components/LayerRail';
 import { BoundaryPanel } from '@/components/BoundaryPanel';
 import { useAgentStream } from '@/hooks/useAgentStream';
@@ -95,6 +96,9 @@ export default function App() {
   const [replyLanguage, setReplyLanguage] = useState('en');
   const [speakReply, setSpeakReply] = useState(true);
   const [seaViewOpen, setSeaViewOpen] = useState(false);
+  // Read once, at mount: reading it in render would restart the intro on every
+  // re-render until the flag was written.
+  const [intro, setIntro] = useState(shouldPlayIntro);
 
   const [rasters, setRasters] = useState<RasterCatalogue | null>(null);
   const [activeLayers, setActiveLayers] = useState<Set<string>>(new Set(['sst']));
@@ -555,6 +559,17 @@ export default function App() {
 
   return (
     <div className="bg-abyss-0 flex h-full flex-col">
+      {/* The console mounts and loads UNDERNEATH the intro, so the six seconds
+          are spent rather than wasted: by the time the globe fades the basemap,
+          the rasters and the boundaries are already there. */}
+      {intro && (
+        <GlobeIntro
+          onFinished={() => {
+            markIntroSeen();
+            setIntro(false);
+          }}
+        />
+      )}
       <FreshnessStrip health={health} freshness={freshness} />
 
       <div className="relative flex-1 overflow-hidden">
