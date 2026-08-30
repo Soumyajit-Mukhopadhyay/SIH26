@@ -41,6 +41,7 @@ import { VerdictCard } from '@/components/VerdictCard';
 import { EvidencePanel } from '@/components/EvidencePanel';
 import { ChatPanel } from '@/components/ChatPanel';
 import { useVoiceRoster } from '@/components/VoiceBar';
+import { SeaStatePanel } from '@/components/SeaStatePanel';
 import { LayerRail } from '@/components/LayerRail';
 import { BoundaryPanel } from '@/components/BoundaryPanel';
 import { useAgentStream } from '@/hooks/useAgentStream';
@@ -93,6 +94,7 @@ export default function App() {
   const voices = useVoiceRoster();
   const [replyLanguage, setReplyLanguage] = useState('en');
   const [speakReply, setSpeakReply] = useState(true);
+  const [seaViewOpen, setSeaViewOpen] = useState(false);
 
   const [rasters, setRasters] = useState<RasterCatalogue | null>(null);
   const [activeLayers, setActiveLayers] = useState<Set<string>>(new Set(['sst']));
@@ -698,6 +700,21 @@ export default function App() {
             voices={voices}
           />
         </div>
+
+        {/* ------- bottom centre: the forecast as the sea it describes -------
+            Anchored bottom-left of the map area so it grows upward and never
+            covers the verdict card, which stays the authority on the page. */}
+        {selection && (
+          <div className="pointer-events-none absolute bottom-3 left-[41rem] z-20 flex flex-col items-start">
+            <SeaStatePanel
+              forecast={forecast}
+              boatClass={activeClass}
+              loaM={loaM}
+              open={seaViewOpen}
+              onToggle={setSeaViewOpen}
+            />
+          </div>
+        )}
 
         {/* ---------------- right: verdict + evidence ---------------- */}
         <div className="pointer-events-none absolute top-3 right-3 bottom-3 z-20 flex w-[24rem] flex-col gap-2">
