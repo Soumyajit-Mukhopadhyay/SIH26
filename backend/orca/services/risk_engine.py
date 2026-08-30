@@ -250,8 +250,11 @@ def assess(
         )
     if lightning_pct is not None and lightning_pct >= LIGHTNING_VETO_PCT:
         source = "CAPE-derived" if cape_j_kg is not None and lightning_pct is not None else ""
+        # One decimal, matching how the value is measured: rounding 72.7 to 73
+        # here made the critic's figure check disagree with a correct draft.
         vetoes.append(
-            f"high lightning probability ({lightning_pct:.0f}%{' ' + source if source else ''})"
+            f"high lightning probability ({_num(round(lightning_pct, 1))}%"
+            f"{' ' + source if source else ''})"
         )
 
     components = [

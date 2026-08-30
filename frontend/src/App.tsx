@@ -29,6 +29,8 @@ import { AOI, HOME_VIEW, OceanMap, type OceanMapHandle } from '@/components/Ocea
 import { FreshnessStrip } from '@/components/FreshnessStrip';
 import { VerdictCard } from '@/components/VerdictCard';
 import { EvidencePanel } from '@/components/EvidencePanel';
+import { ChatPanel } from '@/components/ChatPanel';
+import { useAgentStream } from '@/hooks/useAgentStream';
 
 /**
  * The AOI outline as a densified ring.
@@ -68,6 +70,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [loaM, setLoaM] = useState(8.2);
+
+  const { run: agentRun, ask: askAgent, stop: stopAgent } = useAgentStream();
 
   // ---- boot ----
   useEffect(() => {
@@ -136,6 +140,27 @@ export default function App() {
     if (selection) void query(selection.lon, selection.lat, selection.label, loaM);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaM]);
+
+  // ---- the causal link ----
+  // When the agent answers, the map moves to the bounding box the answer is
+  // about. This is the whole reason ui_spec exists: a judge should see that the
+  // chat and the globe are one system, not two demos sharing a screen.
+  const appliedSpec = useRef<string | null>(null);
+  useEffect(() => {
+    const spec = agentRun.final?.ui_spec;
+    if (!spec || !mapRef.current) return;
+    const key = `${agentRun.runId}`;
+    if (appliedSpec.current === key) return;
+    appliedSpec.current = key;
+    const [west, south, east, north] = spec.bbox;
+    mapRef.current.flyToBox(west, south, east, north);
+  }, [agentRun.final, agentRun.runId]);
+
+  // The agent's verdict is the same rule-engine output as the card's, so adopt
+  // it rather than letting two copies of the same truth drift apart on screen.
+  useEffect(() => {
+    if (agentRun.final?.risk) setRisk(agentRun.final.risk);
+  }, [agentRun.final]);
 
   // ---- layers ----
   const layers = useMemo<Layer[]>(() => {
@@ -317,6 +342,31 @@ export default function App() {
           </div>
         </div>
 
+        {/* ---------------- centre-left: chat + live trace ---------------- */}
+        <div className="glass pointer-events-auto absolute top-3 bottom-3 left-[17.5rem] z-20 flex w-[23rem] flex-col rounded-lg">
+          <ChatPanel
+            run={agentRun}
+            disabled={!selection}
+            placeLabel={
+              selection
+                ? (selection.label ??
+                  `${selection.lat.toFixed(2)}°N ${selection.lon.toFixed(2)}°E`)
+                : null
+            }
+            onAsk={(question) => {
+              if (!selection) return;
+              void askAgent({
+                question,
+                lat: selection.lat,
+                lon: selection.lon,
+                loaM,
+                place: selection.label,
+              });
+            }}
+            onStop={stopAgent}
+          />
+        </div>
+
         {/* ---------------- right: verdict + evidence ---------------- */}
         <div className="pointer-events-none absolute top-3 right-3 bottom-3 z-20 flex w-[24rem] flex-col gap-2">
           {loading && !risk && (
@@ -355,7 +405,7 @@ export default function App() {
 
         {/* ---------------- empty state ---------------- */}
         {!selection && !loading && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+          <div className="pointer-events-none absolute inset-y-0 right-[25rem] left-[41.5rem] z-10 flex items-center justify-center">
             <div className="glass pointer-events-auto max-w-md rounded-lg p-5 text-center">
               <Crosshair className="text-cyan mx-auto mb-3 h-6 w-6" aria-hidden />
               <h1 className="text-ink-0 mb-1.5 text-base font-semibold">
