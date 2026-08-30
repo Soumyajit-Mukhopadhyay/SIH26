@@ -67,27 +67,96 @@ _NUMBER = re.compile(rf"[{_ALL_DIGITS}]+(?:[.,][{_ALL_DIGITS}]+)*")
 #: for those who go astray". Fluent, confident, and it destroyed the single word
 #: the whole advisory exists to convey. The number guard had protected every
 #: figure and waved the verdict straight through.
-PROTECTED_TERMS: tuple[str, ...] = (
+#: Verdict words and other content that must survive VERBATIM and that is only
+#: meaningful in upper case. Matched case-SENSITIVELY on purpose: the rule engine
+#: always emits "NO-GO" and "CAUTION" in caps, and matching case-insensitively
+#: would mask the ordinary English word "go" everywhere it appears in prose,
+#: leaving stray English words scattered through a Tamil advisory.
+PROTECTED_VERDICTS: tuple[str, ...] = (
     "NO-GO",
     "NO GO",
     "CAUTION",
     "UNVERIFIABLE",
     "GO",
-    "IMD",
-    "INCOIS",
-    "ORCA",
-    "VHF",
-    "EEZ",
-    "IMBL",
-    "PFZ",
-    "CAPE",
 )
 
-#: Longest first, so "NO-GO" is masked before "GO" can match inside it.
-_TERM_RE = re.compile(
-    "|".join(re.escape(t) for t in sorted(PROTECTED_TERMS, key=len, reverse=True)),
-    re.IGNORECASE,
+#: Compass bearings, kept in Latin letters rather than translated.
+#:
+#: Sarvam spelled "SSW" out phonetically as "எஸ்எஸ்டபிள்யூ" — letter by letter,
+#: as if reading an unfamiliar acronym aloud. A fisherman reads a bearing off a
+#: compass rose printed in Latin letters, so the Latin form is the useful one.
+#: Upper case only, and word-bounded: a case-insensitive "NE" matches inside
+#: "one", and a case-insensitive "SE" inside "these".
+PROTECTED_BEARINGS: tuple[str, ...] = (
+    "NNE",
+    "ENE",
+    "ESE",
+    "SSE",
+    "SSW",
+    "WSW",
+    "WNW",
+    "NNW",
+    "NE",
+    "SE",
+    "SW",
+    "NW",
 )
+
+#: Names and acronyms, matched case-insensitively because they appear both ways.
+PROTECTED_NAMES: tuple[str, ...] = (
+    "INCOIS",
+    "ORCA",
+    "IMBL",
+    "CAPE",
+    "IMD",
+    "VHF",
+    "EEZ",
+    "PFZ",
+)
+
+#: Everything the guard protects, for reporting and for tests.
+#:
+#: Found the hard way. Asked to translate an advisory beginning "**NO-GO**",
+#: Sarvam returned "**நெறிதவறிச் செல்வோருக்குத் தண்டனை**" — roughly "punishment
+#: for those who go astray". Fluent, confident, and it destroyed the single word
+#: the whole advisory exists to convey. The number guard had protected every
+#: figure and waved the verdict straight through.
+PROTECTED_TERMS: tuple[str, ...] = PROTECTED_VERDICTS + PROTECTED_BEARINGS + PROTECTED_NAMES
+
+
+def _alternation(terms: tuple[str, ...]) -> str:
+    """Longest first, so "NO-GO" is masked before "GO" can match inside it."""
+    return "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True))
+
+
+#: Word-bounded throughout. Without \b, "GO" matched inside "going" and "NE"
+#: inside "one", masking fragments of ordinary words and leaving the remains
+#: untranslatable.
+_TERM_CASED_RE = re.compile(rf"\b(?:{_alternation(PROTECTED_VERDICTS + PROTECTED_BEARINGS)})\b")
+_TERM_ANY_CASE_RE = re.compile(rf"\b(?:{_alternation(PROTECTED_NAMES)})\b", re.IGNORECASE)
+
+
+def _iter_terms(text: str) -> list[re.Match[str]]:
+    """Every protected term in the text, in position order.
+
+    Two regexes rather than one because the case rules differ, and they are
+    merged here so callers see a single ordered stream. Overlaps are impossible
+    in practice (no bearing is a substring of an acronym), but a later match
+    starting inside an earlier one is dropped rather than double-masked.
+    """
+    matches = sorted(
+        [*_TERM_CASED_RE.finditer(text), *_TERM_ANY_CASE_RE.finditer(text)],
+        key=lambda m: m.start(),
+    )
+    kept: list[re.Match[str]] = []
+    end = -1
+    for match in matches:
+        if match.start() >= end:
+            kept.append(match)
+            end = match.end()
+    return kept
+
+
 _TERM_TOKEN = "TRMTOKEN{index}XX"
 _TERM_TOKEN_RE = re.compile(r"TRMTOKEN([A-Z]+)XX", re.IGNORECASE)
 
@@ -228,11 +297,47 @@ def mask_terms(text: str) -> tuple[str, list[str]]:
     """Replace protected terms with opaque tokens, preserving their original case."""
     originals: list[str] = []
 
-    def replace(match: re.Match[str]) -> str:
+    pieces: list[str] = []
+    cursor = 0
+    for match in _iter_terms(text):
         originals.append(match.group(0))
-        return _TERM_TOKEN.format(index=_encode_index(len(originals) - 1))
+        pieces.append(text[cursor : match.start()])
+        pieces.append(_TERM_TOKEN.format(index=_encode_index(len(originals) - 1)))
+        cursor = match.end()
+    pieces.append(text[cursor:])
+    return "".join(pieces), originals
 
-    return _TERM_RE.sub(replace, text), originals
+
+#: Double quotes only. An apostrophe is a legitimate character in English text
+#: and removing one would corrupt a clause that was deliberately left in the
+#: source language; the observed artefact is always a double quote.
+_ALIEN_QUOTES = '"“”'
+
+
+def strip_alien_quotes(text: str, *, source: str) -> str:
+    """Remove double quotes the translator inserted mid-token.
+
+    Sarvam wedges a double quote at boundaries it finds unusual — between a
+    figure and its unit, and inside an all-caps verdict. A single Tamil advisory
+    came back with ``21.4"kn``, ``100"%``, ``2"km`` and, worst of all,
+    ``NO"GO``: every figure correct, every one of them unreadable, and the
+    verdict word broken in a way that also defeats the term check.
+
+    Two conditions before anything is removed, so a real quotation survives:
+
+    * the quote character does not appear in the source at all, and
+    * it sits between two non-space characters.
+
+    Checked per character rather than for quotes in general. An earlier version
+    bailed out if the source contained any quote-like character, and since that
+    set included the apostrophe — which turns up in ordinary English prose all
+    the time — the cleanup almost never ran.
+    """
+    alien = "".join(q for q in _ALIEN_QUOTES if q not in source)
+    if not alien:
+        return text
+    pattern = re.compile(rf"(?<=\S)[{re.escape(alien)}](?=\S)")
+    return pattern.sub("", text)
 
 
 def unmask_terms(text: str, originals: list[str]) -> str:
@@ -247,8 +352,8 @@ def unmask_terms(text: str, originals: list[str]) -> str:
 
 def missing_terms(source: str, output: str) -> list[str]:
     """Protected terms present in the source and absent from the output."""
-    present = {m.group(0).upper() for m in _TERM_RE.finditer(output)}
-    wanted = {m.group(0).upper() for m in _TERM_RE.finditer(source)}
+    present = {m.group(0).upper() for m in _iter_terms(output)}
+    wanted = {m.group(0).upper() for m in _iter_terms(source)}
     return sorted(wanted - present)
 
 
@@ -310,7 +415,7 @@ async def guarded_translate(
        the translation rather than voice a wrong figure.
     """
     source_numbers = extract_numbers(text)
-    source_terms = [m.group(0) for m in _TERM_RE.finditer(text)]
+    source_terms = [m.group(0) for m in _iter_terms(text)]
 
     # Nothing to guard: no numerals AND no protected terms.
     if not source_numbers and not source_terms:
@@ -324,6 +429,7 @@ async def guarded_translate(
         )
 
     direct = await translate(text, **translate_kwargs)
+    direct = strip_alien_quotes(direct, source=text)
     checked = verify(text, direct)
     if checked.ok:
         checked.strategy = "direct"
@@ -340,6 +446,7 @@ async def guarded_translate(
     masked, originals = mask_numbers(text)
     masked, terms = mask_terms(masked)
     masked_translation = await translate(masked, **translate_kwargs)
+    masked_translation = strip_alien_quotes(masked_translation, source=text)
     restored = unmask_terms(masked_translation, terms)
     restored = unmask_numbers(restored, originals, script=target_script)
 

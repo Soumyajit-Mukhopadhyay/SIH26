@@ -31,12 +31,17 @@ import {
   ListChecks,
   Loader2,
   MessageSquare,
+  Split,
   Square,
   Wrench,
   X,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { AgentRun, PlanStep, TraceEvent } from '@/hooks/useAgentStream';
+import { LocalisedAnswer } from '@/components/LocalisedAnswer';
+import { VoiceBar, type VoiceOption } from '@/components/VoiceBar';
+import { useSpeaker } from '@/hooks/useVoice';
+import { inline, stripBullet } from '@/lib/markdown';
 
 const SUGGESTIONS = [
   'Is it safe to go out tomorrow morning?',
@@ -190,6 +195,29 @@ function TraceRow({
         </>,
       );
 
+    case 'decomposition': {
+      const parts = (event.parts as { id: number; text: string; intent: string }[]) ?? [];
+      if (parts.length < 2) return null;
+      return shell(
+        <Split className="text-violet h-3 w-3" aria-hidden />,
+        <>
+          Compound question — split into <span className="data">{parts.length}</span> parts
+          <span className="text-ink-3"> ({String(event.method)})</span>
+        </>,
+        <div className="space-y-0.5">
+          {parts.map((part) => (
+            <div key={part.id} className="flex gap-1.5">
+              <span className="data text-violet shrink-0">{part.intent}</span>
+              <span className="min-w-0 flex-1 truncate">{part.text}</span>
+            </div>
+          ))}
+          <div className="text-ink-3">
+            tools required: <span className="data">{((event.tools as string[]) ?? []).join(', ')}</span>
+          </div>
+        </div>,
+      );
+    }
+
     case 'error':
       return shell(
         <Ban className="text-red h-3 w-3" aria-hidden />,
@@ -214,7 +242,7 @@ function Answer({ text }: { text: string }) {
     <div className="space-y-2">
       {blocks.map((block, index) => {
         const lines = block.split('\n');
-        const isList = lines.every((l) => /^\s*[-*]\s/.test(l));
+        const isList = lines.every((l) => stripBullet(l).bullet);
         if (isList) {
           return (
             <ul key={index} className="space-y-1">
@@ -222,7 +250,7 @@ function Answer({ text }: { text: string }) {
                 <li key={i} className="flex items-start gap-2">
                   <span className="bg-cyan mt-1.5 h-1 w-1 shrink-0 rounded-full" />
                   <span className="text-ink-1 text-xs leading-relaxed">
-                    {inline(line.replace(/^\s*[-*]\s/, ''))}
+                    {inline(stripBullet(line).text)}
                   </span>
                 </li>
               ))}
@@ -239,38 +267,47 @@ function Answer({ text }: { text: string }) {
   );
 }
 
-function inline(text: string): React.ReactNode {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-    part.startsWith('**') && part.endsWith('**') ? (
-      <strong key={i} className="text-ink-0 font-semibold">
-        {part.slice(2, -2)}
-      </strong>
-    ) : (
-      <span key={i}>{part}</span>
-    ),
-  );
-}
-
 export function ChatPanel({
   run,
   onAsk,
   onStop,
   disabled,
   placeLabel,
+  language,
+  onLanguage,
+  speak,
+  onSpeak,
+  voices,
 }: {
   run: AgentRun;
   onAsk: (question: string) => void;
   onStop: () => void;
   disabled: boolean;
   placeLabel: string | null;
+  language: string;
+  onLanguage: (code: string) => void;
+  speak: boolean;
+  onSpeak: (on: boolean) => void;
+  voices: VoiceOption[];
 }) {
   const [draft, setDraft] = useState('');
   const scroller = useRef<HTMLDivElement>(null);
+  const speaker = useSpeaker();
+
+  // Play the advisory as soon as it lands, when speech was asked for. Attempted,
+  // not assumed: a browser that blocks autoplay leaves `blocked` set and the
+  // panel shows a play button rather than pretending it played.
+  const audioUri = run.spoken?.ok ? run.spoken.audio : null;
+  useEffect(() => {
+    if (audioUri) void speaker.play(audioUri);
+    // `speaker` is stable enough for this; re-running on the URI is the intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioUri]);
 
   // Follow the trace as it grows; a timeline you have to chase is useless.
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' });
-  }, [run.events.length, run.final]);
+  }, [run.events.length, run.final, run.localised, run.spoken]);
 
   const submit = () => {
     const question = draft.trim();
@@ -407,6 +444,16 @@ export function ChatPanel({
           </div>
         )}
 
+        <LocalisedAnswer
+          localised={run.localised}
+          spoken={run.spoken}
+          languageName={voices.find((v) => v.code === language)?.name ?? language}
+          playing={speaker.playing}
+          blocked={speaker.blocked}
+          onPlay={(uri) => void speaker.play(uri)}
+          onStop={speaker.stop}
+        />
+
         {run.error && (
           <div className="border-red/40 bg-red/8 mt-3 rounded border px-3 py-2">
             <div className="label text-red mb-1">Agent run failed</div>
@@ -419,7 +466,16 @@ export function ChatPanel({
         )}
       </div>
 
-      <div className="border-hairline border-t p-2">
+      <div className="border-hairline space-y-1.5 border-t p-2">
+        <VoiceBar
+          language={language}
+          onLanguage={onLanguage}
+          speak={speak}
+          onSpeak={onSpeak}
+          onQuestion={onAsk}
+          disabled={disabled || run.running}
+          voices={voices}
+        />
         <div className="flex items-end gap-1.5">
           <textarea
             value={draft}

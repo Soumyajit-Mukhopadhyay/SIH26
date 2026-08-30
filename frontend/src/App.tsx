@@ -40,6 +40,7 @@ import { FreshnessStrip } from '@/components/FreshnessStrip';
 import { VerdictCard } from '@/components/VerdictCard';
 import { EvidencePanel } from '@/components/EvidencePanel';
 import { ChatPanel } from '@/components/ChatPanel';
+import { useVoiceRoster } from '@/components/VoiceBar';
 import { LayerRail } from '@/components/LayerRail';
 import { BoundaryPanel } from '@/components/BoundaryPanel';
 import { useAgentStream } from '@/hooks/useAgentStream';
@@ -86,6 +87,12 @@ export default function App() {
   const [loaM, setLoaM] = useState(8.2);
 
   const { run: agentRun, ask: askAgent, stop: stopAgent } = useAgentStream();
+
+  // Voice settings live here rather than in the panel so they survive a panel
+  // remount, and so the map side can read the chosen language later.
+  const voices = useVoiceRoster();
+  const [replyLanguage, setReplyLanguage] = useState('en');
+  const [speakReply, setSpeakReply] = useState(true);
 
   const [rasters, setRasters] = useState<RasterCatalogue | null>(null);
   const [activeLayers, setActiveLayers] = useState<Set<string>>(new Set(['sst']));
@@ -679,9 +686,16 @@ export default function App() {
                 lon: selection.lon,
                 loaM,
                 place: selection.label,
+                replyLanguage,
+                speak: speakReply,
               });
             }}
             onStop={stopAgent}
+            language={replyLanguage}
+            onLanguage={setReplyLanguage}
+            speak={speakReply}
+            onSpeak={setSpeakReply}
+            voices={voices}
           />
         </div>
 

@@ -7,8 +7,13 @@
  *
  *   node scripts/shot.mjs [outfile] [--click x,y] [--wait ms] [--url u]
  */
-import { chromium } from 'playwright';
 import process from 'node:process';
+// Keep the browser download off C:, which is short on space on this machine.
+// Deliberately OUTSIDE the repo: an in-tree .playwright was 702 MB and a single
+// `git add -A` swept the whole of Chromium into a commit. Set before the dynamic
+// import, since Playwright reads this at module load.
+process.env.PLAYWRIGHT_BROWSERS_PATH ??= 'D:/orca-playwright';
+const { chromium } = await import('playwright');
 
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {

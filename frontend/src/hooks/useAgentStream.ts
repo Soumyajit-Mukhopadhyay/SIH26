@@ -44,6 +44,47 @@ export interface AgentFinal {
   llm_provider: string | null;
 }
 
+/** One sub-question the decomposer found, and the intent it was routed to. */
+export interface SubQuestion {
+  id: number;
+  text: string;
+  intent: string;
+}
+
+export interface Decomposition {
+  method: string;
+  parts: SubQuestion[];
+  tools: string[];
+}
+
+export interface Localised {
+  language: string;
+  text: string;
+  provider: string;
+  /** Figures and verdict terms survived. This is the safety question. */
+  ok: boolean;
+  /** Every clause was translated. A false here with ok true means some clause
+   *  stayed in English rather than being translated unsafely. */
+  fullyTranslated: boolean;
+  detail: string | null;
+  guard: Record<string, unknown>;
+}
+
+export interface Spoken {
+  ok: boolean;
+  /** data: URI — playable with no second round trip. */
+  audio: string | null;
+  /** What was actually said, which is a summary of the written answer. */
+  spokenText: string;
+  summarised: boolean;
+  language: string;
+  speaker: string;
+  durationS: number | null;
+  nativeVoice: boolean;
+  voiceNote: string | null;
+  detail: string | null;
+}
+
 export interface AgentRun {
   runId: string | null;
   question: string;
@@ -53,6 +94,12 @@ export interface AgentRun {
   final: AgentFinal | null;
   error: string | null;
   running: boolean;
+  /** Set when the question turned out to be compound. */
+  decomposition: Decomposition | null;
+  /** The reply in the user's language, when one was asked for. */
+  localised: Localised | null;
+  /** The spoken advisory, when speech was asked for. */
+  spoken: Spoken | null;
   /** Wall-clock ms since the run started, per event — this is what proves the
    *  trace is live rather than replayed from a fixture. */
   timings: Record<number, number>;
@@ -67,6 +114,9 @@ const EMPTY: AgentRun = {
   final: null,
   error: null,
   running: false,
+  decomposition: null,
+  localised: null,
+  spoken: null,
   timings: {},
 };
 
@@ -81,7 +131,16 @@ export function useAgentStream() {
   }, []);
 
   const ask = useCallback(
-    async (args: { question: string; lat: number; lon: number; loaM: number; place?: string }) => {
+    async (args: {
+      question: string;
+      lat: number;
+      lon: number;
+      loaM: number;
+      place?: string;
+      /** Reply in this language. The agent always reasons in English. */
+      replyLanguage?: string;
+      speak?: boolean;
+    }) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -120,6 +179,40 @@ export function useAgentStream() {
               next.final = event as unknown as AgentFinal;
               if (Array.isArray(event.plan)) next.plan = event.plan as PlanStep[];
               break;
+            case 'decomposition':
+              next.decomposition = {
+                method: String(event.method ?? 'unknown'),
+                parts: (event.parts as SubQuestion[]) ?? [],
+                tools: (event.tools as string[]) ?? [],
+              };
+              break;
+            case 'translation':
+              next.localised = {
+                language: String(event.language ?? ''),
+                text: String(event.text ?? ''),
+                provider: String(event.provider ?? ''),
+                ok: Boolean(event.ok),
+                fullyTranslated: Boolean(event.fully_translated ?? event.ok),
+                detail: event.detail ? String(event.detail) : null,
+                guard: (event.guard as Record<string, unknown>) ?? {},
+              };
+              break;
+            case 'audio':
+              next.spoken = {
+                ok: Boolean(event.ok),
+                audio: event.audio ? String(event.audio) : null,
+                spokenText: String(event.spoken_text ?? ''),
+                summarised: Boolean(event.summarised),
+                language: String(event.language ?? ''),
+                speaker: String(event.speaker ?? ''),
+                durationS: event.duration_s === null || event.duration_s === undefined
+                  ? null
+                  : Number(event.duration_s),
+                nativeVoice: Boolean(event.native_voice),
+                voiceNote: event.voice_note ? String(event.voice_note) : null,
+                detail: event.detail ? String(event.detail) : null,
+              };
+              break;
             case 'error':
               next.error = String(event.message ?? 'the agent run failed');
               break;
@@ -139,6 +232,8 @@ export function useAgentStream() {
             lon: args.lon,
             loa_m: args.loaM,
             place: args.place,
+            reply_language: args.replyLanguage,
+            speak: args.speak ?? false,
           }),
         });
 

@@ -405,7 +405,10 @@ async def reporting(state: OrcaState) -> OrcaState:
     ]
 
     try:
-        reply = await complete(messages, temperature=0.25, max_tokens=800)
+        # 800 truncated a compound answer mid-figure ("about 428" for 428 km²),
+        # and a cut-off number is the one output this system must never produce.
+        # The style rules bound the length; this only bounds the failure mode.
+        reply = await complete(messages, temperature=0.25, max_tokens=1200)
         draft = reply.text.strip()
         provider = reply.provider
     except LlmUnavailable:

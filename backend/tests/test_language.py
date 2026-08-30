@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from orca.language import guard
 from orca.language.detect import detect, roster, script_histogram
 from orca.language.guard import (
     PROTECTED_TERMS,
@@ -317,3 +318,87 @@ class TestProtectedTerms:
         result = await guarded_translate("CAUTION advised.", translate=mangler)
         assert result.strategy == "masked"
         assert "CAUTION" in result.text
+
+
+# --- protected terms: word boundaries and case rules -------------------------
+#
+# These pin behaviour found by reading a real Tamil advisory on screen, not by
+# reasoning about the regex.
+
+
+def test_lowercase_go_is_not_masked() -> None:
+    """The ordinary English word "go" must not be protected.
+
+    Case-insensitive matching on "GO" masked every "go" in prose, which left
+    English words scattered through a Tamil advisory. The rule engine always
+    emits the verdict in caps, so upper case is the discriminator.
+    """
+    masked, terms = guard.mask_terms("you can go out, but going far is unwise")
+    assert terms == []
+    assert masked == "you can go out, but going far is unwise"
+
+
+def test_uppercase_verdicts_are_masked() -> None:
+    masked, terms = guard.mask_terms("**NO-GO** now, CAUTION later, GO tomorrow")
+    assert terms == ["NO-GO", "CAUTION", "GO"]
+    assert "NO-GO" not in masked
+    assert guard.unmask_terms(masked, terms) == "**NO-GO** now, CAUTION later, GO tomorrow"
+
+
+def test_bearings_survive_but_do_not_match_inside_words() -> None:
+    """ "SSW" is kept in Latin; "ne" inside "one" is not a bearing.
+
+    Sarvam spelled SSW out phonetically letter by letter. A fisherman reads a
+    bearing off a compass rose printed in Latin, so the Latin form is protected —
+    but an unbounded case-insensitive "NE" matches inside "one" and "SE" inside
+    "these", which would mask fragments of ordinary words.
+    """
+    masked, terms = guard.mask_terms("one zone 713 km SSW and these waters NE of it")
+    assert terms == ["SSW", "NE"]
+    assert masked.startswith("one zone 713 km ")
+    assert "these waters" in masked
+
+
+def test_agency_names_are_case_insensitive() -> None:
+    _, terms = guard.mask_terms("per IMD and incois, via Incois")
+    assert [t.upper() for t in terms] == ["IMD", "INCOIS", "INCOIS"]
+
+
+def test_bearing_lost_in_translation_is_reported() -> None:
+    result = guard.verify("Zone 713 km SSW of you", "உங்களிடமிருந்து 713 கிமீ எஸ்எஸ்டபிள்யூ")
+    assert result.lost_terms == ["SSW"]
+    assert result.ok is False
+
+
+def test_translator_quotes_around_a_mask_token_are_stripped() -> None:
+    """Sarvam wrapped a mask token in quotes, so "47.2/100" came back as
+    `47.2"/"100` — figures correct, punctuation invented."""
+    got = guard.strip_alien_quotes('NUMTOKENAXX"/"NUMTOKENBXX', source="confidence 47.2/100")
+    assert got == "NUMTOKENAXX/NUMTOKENBXX"
+
+
+def test_a_real_quotation_mark_is_not_stripped() -> None:
+    """Losing a genuine quote to tidy up a cosmetic one is the wrong trade."""
+    quoted = 'he said "47.2/100"'
+    got = guard.strip_alien_quotes('NUMTOKENAXX"/"NUMTOKENBXX', source=quoted)
+    assert got == 'NUMTOKENAXX"/"NUMTOKENBXX'
+
+
+def test_a_quote_wedged_between_a_figure_and_its_unit_is_removed() -> None:
+    """Sarvam wedges a double quote where it finds a boundary unusual.
+
+    One Tamil advisory came back with `21.4"kn`, `100"%`, `2"km` and `NO"GO` —
+    every figure correct and every one of them unreadable, with the verdict word
+    broken in a way that also defeats the term check.
+    """
+    got = guard.strip_alien_quotes(
+        'காற்று 21.4"kn, மின்னல் 100"%, NO"GO', source="wind 21.4 kn, lightning 100 %, NO-GO"
+    )
+    assert got == "காற்று 21.4kn, மின்னல் 100%, NOGO"
+
+
+def test_an_apostrophe_is_never_stripped() -> None:
+    """The earlier version treated the apostrophe as a quote, and since ordinary
+    English prose is full of them the cleanup almost never ran at all."""
+    text = "the vessel's limit is 1.5 m"
+    assert guard.strip_alien_quotes(text, source="the vessel's limit is 1.5 m") == text

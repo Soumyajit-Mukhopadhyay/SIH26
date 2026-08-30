@@ -46,3 +46,10 @@ ORCA_SIH2026_Build_Blueprint.docx
 frontend/*.png
 frontend/probe*.mjs
 backend/data/cache/
+
+# Playwright browsers live at D:/orca-playwright, outside the repo. Ignored here
+# too, so an accidental in-tree install cannot be committed.
+.playwright/
+
+# Ad-hoc browser probes; the committed loop is frontend/shot.mjs.
+*.local.mjs
