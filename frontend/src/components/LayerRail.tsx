@@ -131,6 +131,7 @@ export function LayerRail({
   refreshing,
   opacity,
   onOpacity,
+  legendsValid = true,
 }: {
   catalogue: RasterCatalogue | null;
   active: Set<string>;
@@ -139,6 +140,10 @@ export function LayerRail({
   refreshing: boolean;
   opacity: number;
   onOpacity: (value: number) => void;
+  /** False while a visual treatment is recolouring the map. A legend generated
+   *  from a lookup table that no longer matches the pixels is worse than no
+   *  legend: it is a specific false claim about what a colour means. */
+  legendsValid?: boolean;
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const variables = catalogue?.variables ?? [];
@@ -263,7 +268,14 @@ export function LayerRail({
 
                     {isOpen && (
                       <div className="border-hairline mx-2 mb-2 border-t pt-2">
-                        <Legend variable={variable} />
+                        {legendsValid ? (
+                          <Legend variable={variable} />
+                        ) : (
+                          <p className="text-amber text-2xs leading-snug">
+                            Legend hidden: a visual treatment is recolouring the map, so these
+                            stops no longer match the pixels.
+                          </p>
+                        )}
 
                         {variable.statistics && (
                           <div className="text-ink-2 data mt-2 flex gap-3 text-2xs">

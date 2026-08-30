@@ -282,3 +282,21 @@
     transform: translateY(0);
   }
 }
+
+/* The radar treatment's sweep. A CSS custom property animated through 360° so
+   the conic-gradient rotates in the compositor — animating `background-image`
+   itself would re-rasterise the whole layer sixty times a second. */
+@property --orca-sweep {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes orca-radar-sweep {
+  from {
+    --orca-sweep: 0deg;
+  }
+  to {
+    --orca-sweep: 360deg;
+  }
+}

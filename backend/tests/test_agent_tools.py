@@ -1,3 +1,17 @@
+"""The tool catalogue's own invariants.
+
+Not what the tools return — that needs the network — but the structural
+properties the agent plane depends on and that nothing else checks: that every
+tool is reachable from the ordering, that the ordering respects the data
+dependency between conditions and the verdict, and that every intent the query
+decomposer can emit maps to a tool that exists.
+
+These are cheap and they catch the failure mode this file was written for: a
+tool that is present, correct, and silently never selected.
+"""
+
+from __future__ import annotations
+
 # --- one tool ordering, not two ---------------------------------------------
 
 

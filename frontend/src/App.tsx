@@ -46,6 +46,10 @@ import { useVoiceRoster } from '@/components/VoiceBar';
 import { SeaStatePanel } from '@/components/SeaStatePanel';
 import { RoutePanel } from '@/components/RoutePanel';
 import { GlobeIntro, markIntroSeen, shouldPlayIntro } from '@/scenes/GlobeIntro';
+import { TreatmentFilters } from '@/components/TreatmentFilters';
+import { TreatmentRail } from '@/components/TreatmentRail';
+import { TREATMENT_BY_ID, type TreatmentId } from '@/lib/treatments';
+import { useFrameRate } from '@/hooks/useFrameRate';
 import { LayerRail } from '@/components/LayerRail';
 import { BoundaryPanel } from '@/components/BoundaryPanel';
 import { useAgentStream } from '@/hooks/useAgentStream';
@@ -107,6 +111,18 @@ export default function App() {
   // Read once, at mount: reading it in render would restart the intro on every
   // re-render until the flag was written.
   const [intro, setIntro] = useState(shouldPlayIntro);
+  const [treatment, setTreatment] = useState<TreatmentId>('standard');
+  const [treatmentRailOpen, setTreatmentRailOpen] = useState(false);
+  const look = TREATMENT_BY_ID[treatment];
+
+  // The guard measures continuously but only ever takes away a treatment — there
+  // is nothing to give up in Standard, and dropping data layers to protect a
+  // frame rate would be the wrong trade in a safety tool.
+  const frame = useFrameRate({
+    active: treatment !== 'standard',
+    label: `the ${look.label} treatment`,
+    onDegrade: () => setTreatment('standard'),
+  });
 
   const [rasters, setRasters] = useState<RasterCatalogue | null>(null);
   const [activeLayers, setActiveLayers] = useState<Set<string>>(new Set(['sst']));
@@ -683,13 +699,28 @@ export default function App() {
           }}
         />
       )}
+      <TreatmentFilters />
       <FreshnessStrip health={health} freshness={freshness} />
 
       <div className="relative flex-1 overflow-hidden">
-        <OceanMap
-          ref={mapRef}
-          layers={layers}
-          onClick={(lon, lat) => {
+        {/* The treated layer. Only the MAP is inside it: running a filter over
+            the glass panels too would recolour the verdict and make the numbers
+            unreadable, and a NO-GO rendered in phosphor green is exactly the
+            kind of clever that gets someone hurt. */}
+        <div
+          className="absolute inset-0"
+          style={{
+            filter: look.filter ?? undefined,
+            // Promote to its own compositor layer so the filter is applied once
+            // per frame on the GPU rather than re-rasterising on every pan.
+            willChange: look.filter ? 'filter' : undefined,
+            ...look.style,
+          }}
+        >
+          <OceanMap
+            ref={mapRef}
+            layers={layers}
+            onClick={(lon, lat) => {
             // While picking a destination the click sets the endpoint and does
             // NOT move the selection: re-running the point forecast would throw
             // away the origin the user is planning from.
@@ -701,8 +732,12 @@ export default function App() {
             }
             void query(lon, lat);
           }}
-          className="absolute inset-0"
-        />
+            className="absolute inset-0"
+          />
+          {look.overlay && (
+            <div className="pointer-events-none absolute inset-0" style={look.overlay} />
+          )}
+        </div>
 
         {/* ---------------- left rail: place and vessel ---------------- */}
         <div className="pointer-events-none absolute top-3 bottom-3 left-3 z-20 flex w-64 flex-col gap-2 overflow-y-auto">
@@ -870,6 +905,18 @@ export default function App() {
             />
           </div>
         )}
+
+        {/* ---------------- top centre: visual treatments ---------------- */}
+        <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2">
+          <TreatmentRail
+            active={treatment}
+            onChange={setTreatment}
+            fps={frame.fps}
+            degradedReason={frame.reason}
+            open={treatmentRailOpen}
+            onToggle={setTreatmentRailOpen}
+          />
+        </div>
 
         {/* ---------------- right: verdict + evidence ---------------- */}
         <div className="pointer-events-none absolute top-3 right-3 bottom-3 z-20 flex w-[24rem] flex-col gap-2">
