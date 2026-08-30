@@ -217,6 +217,32 @@ class Freshness(BaseModel):
             note=note,
         )
 
+    @property
+    def is_forecast(self) -> bool:
+        """Whether this value describes a time that has not happened yet.
+
+        Forecast points legitimately have a *negative* ``age_hours``: the value
+        describes 06:00 tomorrow and we fetched it today. That is not an error and
+        not staleness — it is lead time, and it must be presented as such rather
+        than as "-14.0 h old", which is meaningless to a reader.
+        """
+        return self.age_hours < 0
+
+    @property
+    def lead_hours(self) -> float:
+        """Hours into the future this value describes. 0 for past observations."""
+        return max(0.0, -self.age_hours)
+
+    @property
+    def staleness_age_hours(self) -> float:
+        """Age for staleness purposes, floored at zero.
+
+        A forecast for three days out is uncertain, not stale, so its negative
+        age must not be allowed to sail through an age check as if it were
+        exceptionally fresh data.
+        """
+        return max(0.0, self.age_hours)
+
     @classmethod
     def static(cls, *, as_of: datetime | None = None) -> Freshness:
         """For CURATED reference data, which has an edition date but no clock."""

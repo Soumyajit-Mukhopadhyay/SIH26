@@ -41,3 +41,7 @@ desktop.ini
 # --- source docs kept out of the repo history (large binaries) ---
 ORCA_SIH2026_Build_Blueprint.pdf
 ORCA_SIH2026_Build_Blueprint.docx
+
+# playwright screenshot helper output
+frontend/*.png
+frontend/probe*.mjs

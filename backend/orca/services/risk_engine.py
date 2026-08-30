@@ -51,6 +51,19 @@ GO_THRESHOLD = 70.0
 CAUTION_THRESHOLD = 40.0
 
 
+def _margin(delta: float, unit: str = "kn") -> str:
+    """A margin, phrased so a tiny overshoot does not round to "a drop of 0".
+
+    22.3 kn against a 22 kn limit is over the line by 0.3, and rendering that as
+    "0 kn" makes a correct veto look like a bug to the person reading it.
+    """
+    if delta < 0.05:
+        return f"barely — it is only just over the limit ({delta:.2f} {unit})"
+    if delta < 1:
+        return f"{delta:.1f} {unit}"
+    return f"{delta:.0f} {unit}" if unit == "kn" else f"{delta:.1f} {unit}"
+
+
 def _num(value: float) -> str:
     """Format a number the way a mariner writes it: 22 kn, not 22.0 kn; 1.5 m,
     not 2 m. These strings go straight into a spoken advisory, so trailing
@@ -374,12 +387,12 @@ def _what_would_change_it(
     if wave_m is not None and wave_m >= boat.max_wave_m:
         out.append(
             f"Hs would need to fall below {_num(boat.max_wave_m)} m "
-            f"(currently {_num(wave_m)} m, a drop of {wave_m - boat.max_wave_m:.1f} m)"
+            f"(currently {_num(wave_m)} m, a drop of {_margin(wave_m - boat.max_wave_m, 'm')})"
         )
     if wind_kn is not None and wind_kn >= boat.max_wind_kn:
         out.append(
             f"wind would need to fall below {_num(boat.max_wind_kn)} kn "
-            f"(currently {_num(wind_kn)} kn, a drop of {wind_kn - boat.max_wind_kn:.0f} kn)"
+            f"(currently {_num(wind_kn)} kn, a drop of {_margin(wind_kn - boat.max_wind_kn)})"
         )
     if not out and verdict in ("CAUTION", "NO-GO"):
         weakest = min(
@@ -420,8 +433,12 @@ def assess_from_evidence(
         return float(item.value)
 
     visibility_m = value("visibility")
+    # `staleness_age_hours` floors a forecast's negative age at zero. A value
+    # valid at 06:00 tomorrow has age -14 h, which is lead time rather than
+    # freshness; letting it through unclamped would report "data -14.0 h old"
+    # and sail past the confidence check as if it were unusually fresh.
     ages = [
-        e.freshness.age_hours
+        e.freshness.staleness_age_hours
         for e in evidence.values()
         if e.value is not None and e.freshness.age_hours != float("inf")
     ]

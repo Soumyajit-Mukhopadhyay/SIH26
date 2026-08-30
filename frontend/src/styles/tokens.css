@@ -1,0 +1,278 @@
+@import 'tailwindcss';
+
+/*
+ * ORCA Deep — the design language.
+ *
+ * An instrument panel, not a website. The rules held without exception:
+ *
+ *  - Monospace for data, sans for prose. Coordinates, Hs, SST, bearings and
+ *    timestamps are JetBrains Mono; chat and labels are Inter. That contrast
+ *    alone is most of what reads as "instrument".
+ *  - Amber means WARNING and red means CRITICAL. Never decorative, not once.
+ *  - Colour is never the only carrier of meaning: every state pairs a colour
+ *    with an icon and a word, because accessibility is a scored requirement and
+ *    a colour-blind judge must get the same information.
+ *  - Glass sparingly: 12px blur, 1px hairline, only on panels floating over the
+ *    unframed map. Glass everywhere reads cheap.
+ */
+
+@theme {
+  /* ---- ground ---- */
+  --color-abyss-0: #04090f; /* page ground */
+  --color-abyss-1: #070f18; /* panel ground */
+  --color-abyss-2: #0b1725; /* raised panel */
+  --color-abyss-3: #122335; /* hover / active raised */
+  --color-hairline: rgb(255 255 255 / 0.07);
+  --color-hairline-strong: rgb(255 255 255 / 0.14);
+
+  /* ---- semantic ---- */
+  --color-cyan: #22d3ee; /* the single accent: interactive, PFZ, currents */
+  --color-amber: #f59e0b; /* WARNING ONLY */
+  --color-red: #ef4444; /* CRITICAL / NO-GO / veto */
+  --color-jade: #34d399; /* GO / healthy / fresh */
+  --color-violet: #a78bfa; /* DERIVED provenance */
+  --color-slate-live: #38bdf8; /* LIVE provenance */
+
+  /* ---- text ---- */
+  --color-ink-0: #e8f0f7; /* primary */
+  --color-ink-1: #94a8bb; /* secondary */
+  --color-ink-2: #5b6f83; /* tertiary / axis labels */
+  --color-ink-3: #37485a; /* disabled */
+
+  /* ---- type ---- */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.875rem;
+
+  /* ---- motion ---- */
+  --ease-out-instrument: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-instrument: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-hairline);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    background: var(--color-abyss-0);
+    color: var(--color-ink-0);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden; /* the console owns the viewport; panels scroll internally */
+  }
+
+  /* Data is monospace and tabular so columns of numbers line up and a value
+     changing in place does not shift the layout under the reader's eye. */
+  .data,
+  .font-mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.1);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(255 255 255 / 0.18);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-cyan);
+    outline-offset: 2px;
+  }
+
+  /* Respect the OS setting. The cinematic intro and the particle layers are the
+     kind of motion that genuinely makes some people ill. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* The only glass in the system. */
+  .glass {
+    background: color-mix(in oklab, var(--color-abyss-1) 82%, transparent);
+    backdrop-filter: blur(12px) saturate(1.2);
+    -webkit-backdrop-filter: blur(12px) saturate(1.2);
+    border: 1px solid var(--color-hairline);
+  }
+
+  .panel {
+    background: var(--color-abyss-1);
+    border: 1px solid var(--color-hairline);
+  }
+
+  .raised {
+    background: var(--color-abyss-2);
+    border: 1px solid var(--color-hairline);
+  }
+
+  /* A label above a value, in the small-caps instrument idiom. */
+  .label {
+    font-size: var(--text-2xs);
+    line-height: var(--text-2xs--line-height);
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--color-ink-2);
+    font-weight: 500;
+  }
+
+  /* Hairline grid, used behind charts and the layer rail to read as an
+     instrument surface rather than a card. */
+  .grid-surface {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.028) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.028) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  /* SIMULATED data is hatched everywhere it appears, so it can never be
+     mistaken for a measurement at a glance. */
+  .hatched {
+    background-image: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 3px,
+      rgb(255 255 255 / 0.14) 3px,
+      rgb(255 255 255 / 0.14) 4px
+    );
+  }
+}
+
+/*
+ * MapLibre's own chrome ships light-themed. Left alone, the zoom buttons, scale
+ * bar and attribution are three white rectangles on a near-black instrument
+ * panel — the fastest way to make a considered interface look unfinished.
+ */
+@layer components {
+  .maplibregl-ctrl-group {
+    background: color-mix(in oklab, var(--color-abyss-1) 88%, transparent) !important;
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--color-hairline) !important;
+    box-shadow: none !important;
+  }
+
+  .maplibregl-ctrl-group button {
+    background: transparent !important;
+  }
+
+  .maplibregl-ctrl-group button + button {
+    border-top: 1px solid var(--color-hairline) !important;
+  }
+
+  .maplibregl-ctrl-group button:hover {
+    background: var(--color-abyss-2) !important;
+  }
+
+  /* The control icons are inlined SVGs with dark strokes; invert them rather
+     than replacing every asset. */
+  .maplibregl-ctrl-group button span {
+    filter: invert(1) brightness(1.5) saturate(0);
+  }
+
+  .maplibregl-ctrl-scale {
+    background: color-mix(in oklab, var(--color-abyss-1) 82%, transparent) !important;
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--color-hairline) !important;
+    border-top: none !important;
+    color: var(--color-ink-1) !important;
+    font-family: var(--font-mono) !important;
+    font-size: 10px !important;
+    font-variant-numeric: tabular-nums;
+    padding: 2px 5px !important;
+  }
+
+  .maplibregl-ctrl-attrib {
+    background: color-mix(in oklab, var(--color-abyss-0) 76%, transparent) !important;
+    backdrop-filter: blur(8px);
+  }
+
+  .maplibregl-ctrl-attrib,
+  .maplibregl-ctrl-attrib a {
+    color: var(--color-ink-2) !important;
+    font-size: 10px !important;
+  }
+
+  .maplibregl-ctrl-attrib-button {
+    filter: invert(1) brightness(1.4) saturate(0);
+    opacity: 0.5;
+  }
+
+  .maplibregl-canvas:focus {
+    outline: none;
+  }
+
+  /* Popups, for layer and vessel hovers. */
+  .maplibregl-popup-content {
+    background: color-mix(in oklab, var(--color-abyss-1) 92%, transparent) !important;
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--color-hairline);
+    border-radius: 6px;
+    color: var(--color-ink-0);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    padding: 8px 10px !important;
+    box-shadow: 0 8px 32px -8px rgb(0 0 0 / 0.7);
+  }
+
+  .maplibregl-popup-tip {
+    border-top-color: var(--color-abyss-1) !important;
+    border-bottom-color: var(--color-abyss-1) !important;
+  }
+}
+
+@keyframes orca-sweep {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes orca-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes orca-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -1,0 +1,139 @@
+/**
+ * The single door to the backend.
+ *
+ * Everything goes through `/api`, which Vite proxies to the FastAPI server in
+ * dev and a reverse proxy serves in production. No base URL to configure, no
+ * CORS story, and nothing to get wrong between the two environments.
+ *
+ * `ApiError` carries the status and the server's own detail string, because
+ * "422: unknown boat class 'IND-XYZ'; see GET /risk/thresholds" is a useful
+ * thing to show a user and "request failed" is not.
+ */
+
+import type {
+  DatasetRoster,
+  ForecastSeries,
+  FreshnessReport,
+  Health,
+  Landmark,
+  PointForecast,
+  RiskResult,
+  ThresholdTable,
+} from './types';
+
+const BASE = '/api';
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+    readonly path: string,
+  ) {
+    super(`${status} on ${path}: ${detail}`);
+    this.name = 'ApiError';
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (cause) {
+    // A network failure is a first-class state, not an exception to swallow:
+    // ORCA has an offline mode and the UI needs to distinguish "the server said
+    // no" from "there is no server".
+    throw new ApiError(0, cause instanceof Error ? cause.message : 'network unreachable', path);
+  }
+
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = (await response.json()) as { detail?: unknown };
+      if (typeof body.detail === 'string') detail = body.detail;
+      else if (body.detail) detail = JSON.stringify(body.detail);
+    } catch {
+      /* a non-JSON error body is fine; statusText will do */
+    }
+    throw new ApiError(response.status, detail, path);
+  }
+
+  return (await response.json()) as T;
+}
+
+const q = (params: Record<string, string | number | boolean | undefined>) =>
+  Object.entries(params)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .join('&');
+
+export const api = {
+  health: () => request<Health>('/healthz'),
+
+  freshness: () => request<FreshnessReport>('/freshness'),
+
+  datasets: () => request<DatasetRoster>('/datasets'),
+
+  landmarks: () => request<{ landmarks: Landmark[] }>('/landmarks'),
+
+  thresholds: () => request<ThresholdTable>('/risk/thresholds'),
+
+  forecastPoint: (lat: number, lon: number, includeSatelliteSst = true) =>
+    request<PointForecast>(
+      `/forecast/point?${q({ lat, lon, include_satellite_sst: includeSatelliteSst })}`,
+    ),
+
+  forecastSeries: (lat: number, lon: number, days = 3) =>
+    request<ForecastSeries>(`/forecast/series?${q({ lat, lon, days })}`),
+
+  assessRisk: (lat: number, lon: number, loaM: number, boatClassCode?: string) =>
+    request<RiskResult>('/risk/assess', {
+      method: 'POST',
+      body: JSON.stringify({
+        lat,
+        lon,
+        loa_m: loaM,
+        ...(boatClassCode ? { boat_class_code: boatClassCode } : {}),
+      }),
+    }),
+};
+
+/**
+ * Human "3.2 h ago" / "just now" / "forecast +14 h".
+ *
+ * A forecast point legitimately has a NEGATIVE age: the value describes 06:00
+ * tomorrow and we fetched it today. That is lead time, not staleness, and
+ * rendering it as "-14.0 h ago" is meaningless to a reader — so future-valid
+ * values are labelled as forecasts instead.
+ */
+export function relativeAge(hours: number | null | undefined): string {
+  if (hours === null || hours === undefined) return 'never';
+  if (hours < -0.017) {
+    const lead = -hours;
+    if (lead < 1) return `forecast +${Math.round(lead * 60)} min`;
+    if (lead < 48) return `forecast +${lead.toFixed(1)} h`;
+    return `forecast +${(lead / 24).toFixed(1)} days`;
+  }
+  if (hours < 0.017) return 'just now';
+  if (hours < 1) return `${Math.round(hours * 60)} min ago`;
+  if (hours < 48) return `${hours.toFixed(1)} h ago`;
+  const days = hours / 24;
+  if (days < 400) return `${days.toFixed(0)} days ago`;
+  return `${(days / 365).toFixed(1)} years ago`;
+}
+
+/** Format a data value the way an instrument would: fixed precision, no drift. */
+export function formatValue(value: number | string | boolean | null, unit?: string | null): string {
+  if (value === null || value === undefined) return '—';
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  if (typeof value === 'string') return value;
+  const magnitude = Math.abs(value);
+  const decimals = magnitude >= 1000 ? 0 : magnitude >= 100 ? 1 : magnitude >= 10 ? 1 : 2;
+  const text = value.toFixed(decimals);
+  return unit ? `${text} ${unit}` : text;
+}

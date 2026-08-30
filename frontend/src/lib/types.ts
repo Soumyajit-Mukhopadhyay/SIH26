@@ -1,0 +1,242 @@
+/**
+ * Types mirroring the backend's pydantic models.
+ *
+ * Hand-written rather than generated, deliberately: the shapes that matter here
+ * are few and stable, and writing them out means the frontend states its
+ * expectations explicitly instead of inheriting whatever the server happens to
+ * emit. `Evidence` in particular is the contract, and it should be readable.
+ */
+
+/** The provenance badge states. Mirrors orca.provenance.Provenance exactly. */
+export type Provenance =
+  | 'live'
+  | 'cached'
+  | 'curated'
+  | 'derived'
+  | 'simulated'
+  | 'unavailable';
+
+export interface Freshness {
+  valid_time: string;
+  retrieved_at: string;
+  age_hours: number;
+  is_stale: boolean;
+  stale_after: string;
+  /** Human sentence. When present it is shown BEFORE the value, never after. */
+  note: string | null;
+}
+
+export interface Citation {
+  label: string;
+  provider: string;
+  url: string | null;
+  identifier: string | null;
+  accessed_at: string | null;
+  quote: string | null;
+}
+
+/** One value, and everything needed to defend it. Never a bare number. */
+export interface Evidence {
+  dataset_id: string;
+  provider: string;
+  variable: string;
+  value: number | string | boolean | null;
+  unit: string | null;
+  provenance: Provenance;
+  freshness: Freshness;
+  /** For DERIVED: the dataset_ids it was computed from. Always non-empty there. */
+  lineage: string[];
+  url: string | null;
+  location: [number, number] | null;
+  method: string | null;
+  uncertainty: number | null;
+  citations: Citation[];
+  notes: string | null;
+}
+
+export interface EvidenceSummary {
+  count: number;
+  /** The WORST provenance state present, never the most flattering. */
+  provenance: Provenance | null;
+  mix: Provenance[];
+  stale: boolean;
+  max_age_hours: number | null;
+}
+
+export interface PointForecast {
+  lat: number;
+  lon: number;
+  place: string | null;
+  generated_at: string;
+  evidence: Record<string, Evidence>;
+  summary: EvidenceSummary;
+}
+
+export type Verdict = 'GO' | 'CAUTION' | 'NO-GO' | 'UNVERIFIABLE';
+
+export interface RiskComponent {
+  name: 'wave' | 'wind' | 'visibility' | 'lightning';
+  value: number | null;
+  unit: string;
+  limit: number;
+  score: number;
+  weight: number;
+  contribution: number;
+  /** The actual arithmetic, shown in the UI. */
+  formula: string;
+  exceeded: boolean;
+}
+
+export interface RiskResult {
+  verdict: Verdict;
+  /** Typed on the server so 'llm' is unrepresentable. */
+  verdict_source: 'rule_engine';
+  index: number;
+  vetoes: string[];
+  components: RiskComponent[];
+  boat_class_code: string;
+  boat_class_label: string;
+  loa_m: number;
+  confidence: 'high' | 'low';
+  escalate: boolean;
+  escalation_message: string | null;
+  data_age_hours: number;
+  thresholds_version: string;
+  evaluated_at: string;
+  evidence: Evidence[];
+  citations: Citation[];
+  what_would_change_it: string[];
+  disclaimer: string;
+}
+
+export interface SeriesPoint {
+  t: string;
+  v: number;
+}
+
+export interface SeriesVariable {
+  unit: string | null;
+  provenance: Provenance;
+  points: SeriesPoint[];
+}
+
+export interface ForecastSeries {
+  lat: number;
+  lon: number;
+  generated_at: string;
+  variables: Record<string, SeriesVariable>;
+}
+
+export interface Landmark {
+  key: string;
+  lat: number;
+  lon: number;
+  label: string;
+}
+
+export interface SourceRow {
+  source: string;
+  provider: string;
+  variables: string[];
+  status: 'ok' | 'degraded' | 'failing' | 'untried' | 'circuit_open' | 'dormant';
+  dormant_reason: string | null;
+  last_success: string | null;
+  last_attempt: string | null;
+  age_hours: number | null;
+  last_error: string | null;
+  successes: number;
+  failures: number;
+  consecutive_failures: number;
+  circuit_open: boolean;
+  provenance: Provenance;
+  median_latency_ms: number | null;
+}
+
+export interface FreshnessReport {
+  generated_at: string;
+  summary: Record<string, number>;
+  sources: SourceRow[];
+  legend: Record<string, string>;
+}
+
+export interface Health {
+  status: 'ok' | 'degraded';
+  degraded: string[];
+  notes: string[];
+  service: string;
+  version: string;
+  env: string;
+  time: string;
+  uptime_s: number;
+  runtime: { python: string; platform: string };
+  infrastructure: {
+    db: string;
+    db_fallback_reason: string | null;
+    cache: string;
+    queue: string;
+    redis_reason: string | null;
+    geofence_index: string;
+    started_at: string;
+  };
+  capabilities: Record<string, boolean>;
+  sources: Record<string, number>;
+}
+
+export interface GridDatasetRow {
+  key: string;
+  dataset_id: string;
+  title: string;
+  provider: string;
+  role: 'live' | 'climatology' | 'archive';
+  coverage_start: string | null;
+  coverage_end: string | null;
+  is_current: boolean;
+  provenance: Provenance;
+  notes: string | null;
+  url: string;
+}
+
+export interface DatasetRoster {
+  generated_at: string;
+  grids: GridDatasetRow[];
+  point_sources: {
+    name: string;
+    provider: string;
+    variables: string[];
+    role: string;
+  }[];
+}
+
+export interface ThresholdClass {
+  code: string;
+  label: string;
+  loa_range_m: [number, number];
+  max_wave_m: number;
+  max_wind_kn: number;
+  min_visibility_km: number;
+  notes: string | null;
+  source_citation: Citation;
+}
+
+export interface ThresholdTable {
+  classes: ThresholdClass[];
+  policy: {
+    thresholds_version: string;
+    lightning_veto_pct: number;
+    cape_veto_j_kg: number;
+    confidence_age_limit_h: number;
+    weights: Record<string, number>;
+    citations: Citation[];
+    disclaimer: string;
+  };
+}
+
+/** A stylistic full-screen post-process. Held separate from data colormaps. */
+export type Treatment =
+  | 'standard'
+  | 'thermal'
+  | 'night-vision'
+  | 'radar'
+  | 'bathymetric'
+  | 'crt'
+  | 'noir';
