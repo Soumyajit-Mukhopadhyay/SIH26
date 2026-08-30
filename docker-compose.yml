@@ -1,0 +1,57 @@
+# ORCA — optional infrastructure.
+#
+# ORCA runs with NONE of this: the default drivers are SQLite + shapely STRtree,
+# an in-process TTL cache and APScheduler. That property is deliberate — the demo
+# must survive a judge's laptop with Docker off.
+#
+# Bring this up and ORCA transparently upgrades:
+#   postgres  -> PostgisRepo   (real PostGIS predicates + pgvector)
+#   redis     -> RedisCache + ARQ queue + alert pub/sub
+#
+#   docker compose up -d
+#   docker compose down            # keeps volumes
+#   docker compose down -v         # drops data
+#
+# Non-default host ports (5433 / 6380) so nothing local is shadowed.
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: orca-postgres
+    environment:
+      POSTGRES_USER: orca
+      POSTGRES_PASSWORD: orca
+      POSTGRES_DB: orca
+    ports:
+      - "5433:5432"
+    volumes:
+      - orca-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orca -d orca"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: orca-redis
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6380:6379"
+    volumes:
+      - orca-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  orca-pgdata:
+  orca-redisdata:

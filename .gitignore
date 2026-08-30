@@ -1,0 +1,43 @@
+# --- secrets ---
+.env
+.env.local
+*.pem
+*.key
+!.env.example
+
+# --- python ---
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- data & generated artefacts ---
+backend/data/orca.db
+backend/data/orca.db-*
+backend/data/rasters/
+backend/data/cache/
+backend/data/checkpoints/
+*.nc
+*.tif
+*.zarr/
+
+# --- node ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# --- os / editor ---
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+
+# --- source docs kept out of the repo history (large binaries) ---
+ORCA_SIH2026_Build_Blueprint.pdf
+ORCA_SIH2026_Build_Blueprint.docx
