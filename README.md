@@ -8,8 +8,60 @@ agents, computes a safety verdict with a **deterministic rule engine**, and answ
 number carrying its source, its provenance state and its age.
 
 - `docs/PLAN.md` — the master build plan (architecture, science, 16 build steps)
+- `docs/REQUIREMENT_MATRIX.md` — every claim, its state, and **how to check it**
+- `docs/DEMO_SCRIPT.md` — the eight-minute run, live, without a code change
 - `docs/CREDENTIALS_VERIFIED.md` — every credential and endpoint, live-tested
 - `ORCA_SIH2026_Build_Blueprint.pdf` — the originating blueprint
+
+---
+
+## What it does
+
+Ten things, each of which can be checked on a running system — see
+`docs/REQUIREMENT_MATRIX.md` for the check per row.
+
+**Decide.** A `GO / CAUTION / NO-GO / UNVERIFIABLE` for a position and a vessel
+class, from a deterministic rule engine with cited, versioned thresholds. Hard
+vetoes are a separate mechanism from the blended index, so no amount of good
+weather elsewhere can outvote an exceeded limit.
+
+**Refuse.** `UNVERIFIABLE` is a first-class verdict with its own card, because a
+system that renders missing data as calm water is worse than no system.
+
+**Attribute.** Every value carries its dataset, provider, age and one of six
+provenance states. Lead time is distinguished from staleness: a forecast valid at
+06:00 tomorrow is not stale data.
+
+**Explain.** A LangGraph supervisor publishes its plan before it runs anything,
+streams each tool call with its measured latency, and passes the draft to a critic
+that can reject it for disagreeing with the rule engine — visibly, with the round
+count on screen.
+
+**Speak.** Eleven Indian languages in and out, by voice. Every numeral, unit and
+verdict term is masked, re-injected verbatim and verified as a multiset, per
+clause, and a clause that cannot be verified stays in the source language rather
+than being translated unsafely.
+
+**Route.** A* over a lattice costed by the same rule engine, where a vetoed cell
+is impassable rather than expensive. When no passage exists, the blocking cells
+are named with their reasons.
+
+**Search.** SAR drift as a 2000-particle Monte Carlo (IAMSAR `current +
+leeway(wind)`) returning 50% and 95% containment areas — never a single predicted
+position.
+
+**Warn.** A trip monitor that speaks without being asked, on transitions only,
+carrying the previous value beside the current one.
+
+**Show.** A MapLibre globe with deck.gl: SST, chlorophyll, thermal fronts, derived
+PFZ, wind and current particle advection, EEZ and IMBL treaty lines, geofence
+transitions. Plus a 3D sea state driven by the real Hs, period and direction, and
+seven visual treatments behind a frame-rate guard that actually gives something
+up.
+
+**Hand off.** CAP 1.2 XML, bilingual, in the OASIS standard NDMA SACHET and IMD
+already publish in — built to feed the systems that exist rather than replace
+them.
 
 ---
 
@@ -74,9 +126,19 @@ engineering maturity and getting caught without them reads as reckless.
 6. **AIS coverage over the Indian Ocean is sparse** on the free tier. Real vessels render `LIVE`;
    the demo fleet renders `SIMULATED`, hatched, and is never silently mixed with live data.
 7. **Konkani has no TTS** in either IndicF5 or Bulbul.
-8. ORCA is safety-of-life-**adjacent** decision support, not a certified marine safety system.
-   Real deployment needs validation against historical incident data and sign-off from a maritime
-   safety authority.
+8. **The lightning veto is CAPE-derived, and CAPE is potential rather than occurrence.** During
+   the south-west monsoon large stretches of the Indian coast carry 2000–4500 J/kg, which maps
+   above the 60% veto and makes ORCA refuse almost everything there. The honest reading of a
+   lightning NO-GO is "thunderstorm potential is high across this whole area", not "a storm is
+   over your boat". A convective-inhibition gate would sharpen it; it is not implemented.
+9. **Routing coarsens its lattice under the upstream call budget, and a coarser lattice is a MORE
+   conservative router** — one vetoed 60 km cell blocks a corridor a boat might thread. The
+   response says so when it happens.
+10. **Traces do not survive a restart.** `/agent/runs/{id}` replays from an in-process ring
+    buffer; the `agent_runs`/`agent_steps` tables are not wired.
+11. ORCA is safety-of-life-**adjacent** decision support, not a certified marine safety system.
+    Real deployment needs validation against historical incident data and sign-off from a maritime
+    safety authority.
 
 ## The provenance contract
 
@@ -116,6 +178,33 @@ backend/orca/
   api/routes/     the HTTP surface
   jobs/           scheduler, ingest, and the proactive trip monitor
 ```
+
+## Tests
+
+```powershell
+.\scripts\dev.ps1 -Test    # ruff format + ruff check + pytest
+```
+
+312 tests. What they are for is worth stating, because the count on its own means
+nothing: the suite exists to pin the behaviours that are invisible from outside
+and expensive to get wrong. A sample of what is actually asserted —
+
+- the blueprint's worked risk case returns **index 25, NO-GO, 2 vetoes**;
+- `services/` never imports `agents/`, so the deterministic core cannot acquire a
+  model dependency by accident;
+- the number guard catches an injected mangle, and a **unit** mangle (`kn` → `km`)
+  is caught even when every numeral survives;
+- protected verdict words survive every hyphen variant a model might emit,
+  including U+2011, which once produced `NO‽GO`;
+- A\* returns the same cost as exhaustive Dijkstra over the same lattice, so
+  "optimal under the cost model" is verified rather than asserted;
+- the trip monitor stays **silent** on a first observation and on a persisting
+  condition — the silence is the feature;
+- `geodesic_m` matches PostGIS to 0.001 m on a known pair.
+
+The frontend is checked by rendering it: `frontend/shot.mjs` screenshots the
+console and reports every console error and failed request, because a clean
+typecheck says nothing about whether the globe painted.
 
 ## Security
 
