@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from orca.api.routes import agent as agent_routes
 from orca.api.routes import forecast as forecast_routes
 from orca.api.routes import health as health_routes
+from orca.api.routes import language as language_routes
 from orca.api.routes import rasters as raster_routes
 from orca.config import DbDriver, Settings, get_settings, mask_dsn
 from orca.obs.logging import configure_logging
@@ -217,6 +218,7 @@ def create_app() -> FastAPI:
     app.include_router(forecast_routes.router)
     app.include_router(agent_routes.router)
     app.include_router(raster_routes.router)
+    app.include_router(language_routes.router)
 
     @app.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:
