@@ -18,11 +18,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from orca.provenance import Evidence
+from orca.provenance import Evidence, Freshness, Provenance, Provider
 from orca.services import thresholds
+from orca.services.cross_validation import validate_point
+from orca.services.overpass import predict_overpasses
 from orca.services.risk_engine import assess_from_evidence
 from orca.sources import open_meteo
+from orca.sources.ais import aisstream
 from orca.sources.erddap import DATASETS, erddap
+from orca.sources.gfw import gfw
 
 log = logging.getLogger(__name__)
 
@@ -129,6 +133,119 @@ async def _fetch_satellite_sst(lat: float, lon: float, **_: Any) -> ToolResult:
         summary=f"MUR satellite SST {sst.value} °C (1 km, {sst.freshness.age_hours:.0f} h old)",
         evidence=list(values.values()),
         data={"sst": sst.value},
+    )
+
+
+async def _predict_overpasses(lat: float, lon: float, **_: Any) -> ToolResult:
+    prediction = await predict_overpasses(lat, lon, hours=48)
+    if not prediction.passes:
+        return ToolResult(
+            ok=not prediction.unavailable_satellites,
+            tool="predict_satellite_overpasses",
+            summary="no nominal sensor-swath crossing in the next 48 hours",
+            data=prediction.model_dump(mode="json"),
+            error="; ".join(prediction.unavailable_satellites) or None,
+        )
+    first = prediction.passes[0]
+    evidence = [
+        Evidence(
+            dataset_id=f"sgp4:{item.norad_id}",
+            provider=Provider.ORCA,
+            variable="satellite_overpass",
+            value=item.closest_time.isoformat(),
+            unit="UTC",
+            provenance=Provenance.DERIVED,
+            freshness=Freshness.of("tle", item.tle_epoch),
+            lineage=[f"celestrak.gp:{item.norad_id}"],
+            url=item.source_url,
+            location=(lon, lat),
+            method="SGP4 ground track intersected with nominal instrument swath",
+            notes=item.caveat,
+        )
+        for item in prediction.passes[:3]
+    ]
+    return ToolResult(
+        ok=True,
+        tool="predict_satellite_overpasses",
+        summary=(
+            f"next nominal swath opportunity: {first.satellite} at "
+            f"{first.closest_time:%Y-%m-%d %H:%M UTC}, closest track "
+            f"{first.closest_distance_km:.0f} km"
+        ),
+        evidence=evidence,
+        data=prediction.model_dump(mode="json"),
+    )
+
+
+async def _cross_validate(lat: float, lon: float, **_: Any) -> ToolResult:
+    result = await validate_point(lat, lon, include_wave=True)
+    evidence: list[Evidence] = []
+    seen: set[tuple[str, str]] = set()
+    for check in result.checks:
+        for item in (check.primary, check.secondary):
+            key = (item.dataset_id, item.variable)
+            if key not in seen:
+                evidence.append(item)
+                seen.add(key)
+    counts = result.summary
+    return ToolResult(
+        ok=counts.get("agree", 0) + counts.get("disagree", 0) > 0,
+        tool="cross_validate_conditions",
+        summary=(
+            f"cross-validation: {counts.get('agree', 0)} agree, "
+            f"{counts.get('disagree', 0)} disagree, "
+            f"{counts.get('inconclusive', 0)} inconclusive, "
+            f"{counts.get('unavailable', 0)} unavailable"
+        ),
+        evidence=evidence,
+        data=result.model_dump(mode="json"),
+    )
+
+
+async def _check_vessel_traffic(lat: float, lon: float, **_: Any) -> ToolResult:
+    snapshot = await aisstream.snapshot(
+        (lon - 0.5, lat - 0.5, lon + 0.5, lat + 0.5), duration_seconds=5
+    )
+    count_evidence = Evidence(
+        dataset_id="aisstream.websocket",
+        provider=Provider.AISSTREAM,
+        variable="ais_position",
+        value=len(snapshot.vessels) if snapshot.connected else None,
+        unit="vessels observed in 5 s",
+        provenance=snapshot.provenance,
+        freshness=Freshness.of("ais_position", snapshot.started_at),
+        location=(lon, lat),
+        notes=snapshot.coverage_note if snapshot.connected else snapshot.error,
+    )
+    return ToolResult(
+        ok=snapshot.connected,
+        tool="check_vessel_traffic",
+        summary=(
+            f"live AIS snapshot saw {len(snapshot.vessels)} vessel(s); zero does not prove "
+            "empty water because Indian-Ocean receiver coverage is sparse"
+            if snapshot.connected
+            else f"AIS snapshot unavailable: {snapshot.error}"
+        ),
+        evidence=[count_evidence],
+        data=snapshot.model_dump(mode="json"),
+        error=snapshot.error,
+    )
+
+
+async def _check_fishing_activity(lat: float, lon: float, **_: Any) -> ToolResult:
+    report = await gfw.effort((lon - 0.5, lat - 0.5, lon + 0.5, lat + 0.5), days=30)
+    return ToolResult(
+        ok=report.available,
+        tool="check_fishing_activity",
+        summary=(
+            f"GFW found {report.total_apparent_fishing_hours:.1f} apparent fishing hours "
+            f"from {report.vessel_count} vessel(s), through {report.end_date}"
+            if report.available
+            else f"GFW report unavailable: {report.error}"
+        ),
+        evidence=[report.evidence],
+        data=report.model_dump(mode="json"),
+        error=report.error,
     )
 
 
@@ -444,6 +561,81 @@ TOOLS: dict[str, Tool] = {
         run=_fetch_satellite_sst,
         owner="ocean",
     ),
+    "predict_satellite_overpasses": Tool(
+        name="predict_satellite_overpasses",
+        description=(
+            "Predict the next Sentinel-3 and EOS-06 nominal sensor-swath crossings over a "
+            "point using current CelesTrak elements and SGP4. This is an opportunity, not "
+            "confirmation that a cloud-free image will be acquired."
+        ),
+        capability=Capability(
+            answers=("satellite", "overpass", "imagery_time", "when_photographed"),
+            resolution_deg=None,
+            latency_ms=1600,
+            provenance="derived",
+            cost=2,
+            coverage="global, next 48 hours",
+            decision_grade=False,
+            notes="Current GP/TLE input; nominal swath geometry; acquisition is not guaranteed.",
+        ),
+        run=_predict_overpasses,
+        owner="data_discovery",
+    ),
+    "cross_validate_conditions": Tool(
+        name="cross_validate_conditions",
+        description=(
+            "Cross-check SST, 10 m wind and significant wave height against independent NASA, "
+            "satellite and Copernicus Marine sources with unit and valid-time alignment."
+        ),
+        capability=Capability(
+            answers=("cross_validation", "reliability", "source_agreement", "verify"),
+            resolution_deg=0.083,
+            latency_ms=5000,
+            provenance="live",
+            cost=4,
+            coverage="global where all source grids answer",
+            decision_grade=False,
+            notes="Disagreement is surfaced; sources are never silently averaged.",
+        ),
+        run=_cross_validate,
+        owner="data_discovery",
+    ),
+    "check_vessel_traffic": Tool(
+        name="check_vessel_traffic",
+        description=(
+            "Take a bounded five-second live AISStream snapshot around the point. Zero is "
+            "reported with the sparse Indian-Ocean receiver-coverage caveat."
+        ),
+        capability=Capability(
+            answers=("ais", "vessels", "traffic", "collision"),
+            resolution_deg=None,
+            latency_ms=5500,
+            provenance="live",
+            cost=3,
+            coverage="receiver-dependent; sparse over much of the Indian Ocean",
+            decision_grade=False,
+        ),
+        run=_check_vessel_traffic,
+        owner="geospatial",
+    ),
+    "check_fishing_activity": Tool(
+        name="check_fishing_activity",
+        description=(
+            "Query Global Fishing Watch for historical apparent fishing effort around the "
+            "point. This is AIS-derived and delayed, not live tracking or proof of illegality."
+        ),
+        capability=Capability(
+            answers=("fishing_activity", "fishing_effort", "gfw", "fleet_history"),
+            resolution_deg=0.1,
+            latency_ms=10000,
+            provenance="live",
+            cost=4,
+            coverage="global AIS-transmitting fishing fleet; several-day delay",
+            decision_grade=False,
+        ),
+        run=_check_fishing_activity,
+        owner="ocean",
+    ),
     "assess_risk": Tool(
         name="assess_risk",
         description=(
@@ -566,6 +758,10 @@ TOOL_ORDER: tuple[str, ...] = (
     "fetch_marine_conditions",
     "fetch_forecast_window",
     "fetch_satellite_sst",
+    "predict_satellite_overpasses",
+    "cross_validate_conditions",
+    "check_vessel_traffic",
+    "check_fishing_activity",
     "find_fishing_zones",
     "lookup_boat_thresholds",
     "assess_risk",

@@ -40,6 +40,10 @@ Intent = Literal[
     "boundary",
     "provenance",
     "thresholds",
+    "overpass",
+    "traffic",
+    "fishing_activity",
+    "cross_validation",
     "location",
     "other",
 ]
@@ -58,6 +62,10 @@ INTENT_TOOLS: dict[Intent, tuple[str, ...]] = {
     "boundary": ("fetch_marine_conditions",),
     "provenance": ("discover_datasets",),
     "thresholds": ("lookup_boat_thresholds",),
+    "overpass": ("predict_satellite_overpasses",),
+    "traffic": ("check_vessel_traffic",),
+    "fishing_activity": ("check_fishing_activity",),
+    "cross_validation": ("cross_validate_conditions",),
     "location": ("fetch_marine_conditions",),
     "other": ("fetch_marine_conditions",),
 }
@@ -163,6 +171,37 @@ _HINTS: dict[Intent, tuple[str, ...]] = {
         "seemai",
         "सीमा",
         "எனது படகு",
+    ),
+    "overpass": (
+        "satellite pass",
+        "overpass",
+        "next satellite",
+        "photograph this",
+        "image this",
+        "sgp4",
+        "tle",
+    ),
+    "traffic": (
+        "ais",
+        "vessel traffic",
+        "nearby vessel",
+        "nearby ship",
+        "collision",
+    ),
+    "fishing_activity": (
+        "global fishing watch",
+        "fishing watch",
+        "fishing activity",
+        "apparent fishing",
+        "fleet history",
+    ),
+    "cross_validation": (
+        "cross validate",
+        "cross-validate",
+        "sources agree",
+        "verify values",
+        "second source",
+        "independent source",
     ),
     "location": ("where am i", "position", "nearest port", "harbour", "harbor", "how far"),
 }
@@ -305,8 +344,9 @@ async def decompose(question: str) -> Decomposition:
     system = (
         "Split a marine question into its separate answerable parts.\n\n"
         'Return ONLY JSON: {"parts": [{"text": "...", "intent": "..."}]}\n\n'
-        "intent must be exactly one of: safety, forecast, fishing, boundary, "
-        "provenance, thresholds, location, other.\n\n"
+        "intent must be exactly one of: safety, forecast, fishing, routing, boundary, "
+        "provenance, thresholds, overpass, traffic, fishing_activity, cross_validation, "
+        "location, other.\n\n"
         "Rules:\n"
         "- One part per distinct thing the user wants to know. Most questions are ONE part.\n"
         "- Do NOT split a single request that merely lists variables "

@@ -207,6 +207,138 @@ export interface DatasetRoster {
   }[];
 }
 
+export interface IntegrationState {
+  implemented: boolean;
+  configured: boolean;
+  runtime_ready: boolean;
+  mode: string;
+  caveat: string;
+}
+
+export interface GroundPoint {
+  time: string;
+  lon: number;
+  lat: number;
+}
+
+export interface SatelliteOverpass {
+  satellite: string;
+  norad_id: number;
+  sensor: string;
+  start_time: string;
+  closest_time: string;
+  end_time: string;
+  closest_distance_km: number;
+  swath_width_km: number;
+  daylight_at_target: boolean;
+  tle_epoch: string;
+  tle_age_hours: number;
+  tle_provenance: Provenance;
+  confidence: string;
+  source_url: string;
+  caveat: string;
+  ground_track: GroundPoint[];
+}
+
+export interface OverpassResponse {
+  lat: number;
+  lon: number;
+  generated_at: string;
+  horizon_hours: number;
+  step_seconds: number;
+  passes: SatelliteOverpass[];
+  unavailable_satellites: string[];
+  method: string;
+  caveat: string;
+}
+
+export type ValidationStatus = 'agree' | 'disagree' | 'inconclusive' | 'unavailable';
+
+export interface CrossCheck {
+  variable: string;
+  status: ValidationStatus;
+  primary: Evidence;
+  secondary: Evidence;
+  canonical_unit: string;
+  primary_value: number | null;
+  secondary_value: number | null;
+  absolute_difference: number | null;
+  tolerance: number | null;
+  time_separation_hours: number | null;
+  tolerance_basis: string;
+  message: string;
+}
+
+export interface CrossValidationResponse {
+  lat: number;
+  lon: number;
+  generated_at: string;
+  checks: CrossCheck[];
+  summary: Record<ValidationStatus, number>;
+  note: string;
+}
+
+export interface VesselPosition {
+  mmsi: string;
+  name: string | null;
+  lat: number;
+  lon: number;
+  speed_kn: number | null;
+  course_deg: number | null;
+  heading_deg: number | null;
+  message_type: string;
+  received_at: string;
+  provenance: Provenance;
+}
+
+export interface AisSnapshot {
+  bbox: [number, number, number, number];
+  started_at: string;
+  duration_seconds: number;
+  connected: boolean;
+  vessels: VesselPosition[];
+  raw_position_reports: number;
+  provenance: Provenance;
+  error: string | null;
+  coverage_note: string;
+}
+
+export interface FishingEntry {
+  vessel_id: string | null;
+  mmsi: string | null;
+  name: string | null;
+  flag: string | null;
+  gear_type: string | null;
+  lat: number | null;
+  lon: number | null;
+  apparent_fishing_hours: number;
+}
+
+export interface FishingEffortResponse {
+  bbox: [number, number, number, number];
+  start_date: string;
+  end_date: string;
+  available: boolean;
+  entries: FishingEntry[];
+  total_apparent_fishing_hours: number;
+  vessel_count: number;
+  evidence: Evidence;
+  error: string | null;
+  caveat: string;
+}
+
+export interface NasaGranuleSearch {
+  hits: number;
+  granules: { concept_id: string; title: string; start_time: string | null }[];
+  note: string;
+}
+
+export interface SentinelCatalogueSearch {
+  returned: number;
+  items: { item_id: string; acquired_at: string | null; cloud_cover_percent: number | null }[];
+  note: string;
+}
+
 export interface ThresholdClass {
   code: string;
   label: string;

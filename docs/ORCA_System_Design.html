@@ -753,11 +753,11 @@ body {
           <div class="layer-body">
             <ul class="mods">
               <li>open_meteo.py</li><li>erddap.py — INCOIS</li><li>marine_regions.py</li><li>tls.py</li><li>base.py</li>
-              <li class="dim">cmems.py</li><li class="dim">earthdata.py</li><li class="dim">ais.py</li><li class="dim">gfw.py</li>
+              <li>cmems.py</li><li>nasa.py</li><li>sentinel_hub.py</li><li>celestrak.py</li><li>ais.py</li><li>gfw.py</li>
             </ul>
             <p>ORCA owns no sensors, so a large part of the engineering is behaving well as a guest on other people's systems. A source being down returns a result <em>marked</em> as failed rather than crashing the request, and every success and failure feeds the “sources 6/7” readout — which is a measurement, not a decoration.</p>
             <div class="note veto"><b>The worst bug in the project's history.</b> Ocean current speed was being read as metres per second while the service returned knots — a factor of two, silently, on a value that feeds routing and search-and-rescue drift. The rule that came out of it: <b>never assume a unit; read the one the response declares and convert — and if the conversion is not physically meaningful, mark the value UNAVAILABLE rather than passing it through with a hopeful label.</b></div>
-            <p style="margin-top:0.7rem">Dashed modules are unwritten. Credentials for Copernicus Marine, NASA Earthdata, AIS and Global Fishing Watch load and are reported as available capabilities — but <strong>nothing calls them today</strong>, and we state that rather than counting them as integrations.</p>
+            <p style="margin-top:0.7rem">The operational adapters now call Copernicus Marine, NASA CMR/POWER, Sentinel Hub, AISStream, Global Fishing Watch and CelesTrak. Each integration reports its real mode and caveat through <code>/integrations/status</code>; catalogue discovery, live observations, model values and derived predictions are never presented as the same thing.</p>
           </div>
         </article>
 
@@ -1028,20 +1028,20 @@ body {
         <p>PostGIS is probed and the in-memory fallback works, but the repository layer is unwritten — so <strong>nothing survives a restart</strong>. Traces, alerts and watched positions all live in memory.</p>
       </div>
       <div class="rm">
-        <div class="rm-top"><span class="chip later">later</span><h4>Second-source adapters</h4></div>
-        <p>Copernicus Marine, NASA Earthdata, Sentinel Hub, AIS, Global Fishing Watch. Credentials load; adapters unwritten. They would give higher resolution, history, and a second independent source to cross-check against.</p>
+        <div class="rm-top"><span class="chip built">built</span><h4>Second-source adapters</h4></div>
+        <p>Copernicus Marine, NASA Earthdata/POWER, Sentinel Hub, AISStream and Global Fishing Watch are callable and tested. Catalogue results remain metadata, AIS zero-counts retain their coverage caveat, and GFW remains delayed apparent activity.</p>
       </div>
       <div class="rm">
-        <div class="rm-top"><span class="chip partial">partial</span><h4>Broader cross-validation</h4></div>
-        <p>ORCA already compares model against satellite sea temperature and says whether the sources agree, measured against combined uncertainty. It is the <em>only</em> pair cross-validated, and extending it needs the adapters above.</p>
+        <div class="rm-top"><span class="chip built">built</span><h4>Broader cross-validation</h4></div>
+        <p>ORCA now validates SST, wind and significant wave height across independent sources after unit conversion and valid-time alignment. It reports agree, disagree, inconclusive or unavailable and never silently averages disagreement.</p>
       </div>
       <div class="rm">
         <div class="rm-top"><span class="chip later">later</span><h4>Authority dashboard</h4></div>
         <p>Today's console is single-vessel. A fisheries officer needs a fleet view: many boats, aggregate risk, who is in trouble. The data model supports it; the interface does not exist.</p>
       </div>
       <div class="rm">
-        <div class="rm-top"><span class="chip later">later</span><h4>Satellite overpass · SGP4</h4></div>
-        <p>“When will a satellite next photograph this water?” Needs the standard orbital propagator. The data adapter exists; the propagator and its panel do not.</p>
+        <div class="rm-top"><span class="chip built">built</span><h4>Satellite overpass · SGP4</h4></div>
+        <p>Current CelesTrak elements are propagated for Sentinel-3A/B and EOS-06 and shown in the operational-intelligence panel. The result is explicitly a nominal-swath opportunity, not confirmation of acquisition or usable cloud cover.</p>
       </div>
       <div class="rm">
         <div class="rm-top"><span class="chip later">later</span><h4>Multi-leg trip planner</h4></div>

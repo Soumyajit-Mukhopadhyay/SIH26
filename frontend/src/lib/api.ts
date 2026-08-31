@@ -27,6 +27,13 @@ import type {
   RiskResult,
   RoutePlan,
   ThresholdTable,
+  AisSnapshot,
+  CrossValidationResponse,
+  FishingEffortResponse,
+  IntegrationState,
+  NasaGranuleSearch,
+  OverpassResponse,
+  SentinelCatalogueSearch,
 } from './types';
 
 const BASE = '/api';
@@ -90,6 +97,32 @@ export const api = {
   landmarks: () => request<{ landmarks: Landmark[] }>('/landmarks'),
 
   thresholds: () => request<ThresholdTable>('/risk/thresholds'),
+
+  integrations: () => request<Record<string, IntegrationState>>('/integrations/status'),
+
+  overpasses: (lat: number, lon: number, hours = 48) =>
+    request<OverpassResponse>(`/satellites/overpasses?${q({ lat, lon, hours })}`),
+
+  validatePoint: (lat: number, lon: number, includeWave = true) =>
+    request<CrossValidationResponse>(
+      `/validation/point?${q({ lat, lon, include_wave: includeWave })}`,
+    ),
+
+  aisSnapshot: (lat: number, lon: number, radiusDeg = 0.5, durationSeconds = 5) =>
+    request<AisSnapshot>(
+      `/traffic/ais?${q({ lat, lon, radius_deg: radiusDeg, duration_seconds: durationSeconds })}`,
+    ),
+
+  fishingEffort: (lat: number, lon: number, radiusDeg = 0.5, days = 30) =>
+    request<FishingEffortResponse>(
+      `/traffic/fishing-effort?${q({ lat, lon, radius_deg: radiusDeg, days })}`,
+    ),
+
+  nasaCatalogue: (lat: number, lon: number, days = 7) =>
+    request<NasaGranuleSearch>(`/catalog/nasa?${q({ lat, lon, days })}`),
+
+  sentinelCatalogue: (lat: number, lon: number, days = 7) =>
+    request<SentinelCatalogueSearch>(`/catalog/sentinel?${q({ lat, lon, days })}`),
 
   forecastPoint: (lat: number, lon: number, includeSatelliteSst = true) =>
     request<PointForecast>(

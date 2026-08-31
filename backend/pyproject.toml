@@ -34,6 +34,9 @@ dependencies = [
   "defusedxml>=0.7",
   # --- orbits ---
   "sgp4>=2.23",
+  # --- operational external adapters ---
+  "websockets>=14.0",
+  "copernicusmarine>=2.4",
   # --- agents ---
   "langgraph>=0.2.50",
   "langgraph-checkpoint-sqlite>=2.0",
@@ -43,7 +46,7 @@ dependencies = [
 [project.optional-dependencies]
 postgis = ["asyncpg>=0.30"]
 observability = ["langfuse>=2.53"]
-heavy-ingest = ["earthaccess>=0.12", "copernicusmarine>=2.0", "rasterio>=1.4", "rioxarray>=0.18"]
+heavy-ingest = ["earthaccess>=0.12", "rasterio>=1.4", "rioxarray>=0.18"]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.22", "ruff>=0.8", "anyio>=4.6"]
 
 [build-system]

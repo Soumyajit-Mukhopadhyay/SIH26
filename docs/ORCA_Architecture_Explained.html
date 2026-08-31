@@ -919,12 +919,13 @@
       </tr>
       <tr>
         <td><b>Copernicus Marine · NASA Earthdata · Sentinel Hub · AISStream · Global Fishing Watch</b></td>
-        <td><span class="pill later">Later</span></td>
+        <td><span class="pill built">Built</span></td>
         <td>
-          Credentials are configured and load correctly, and the system reports them as
-          available capabilities. <b>The adapters that would use them are not written.</b>
-          Nothing in ORCA calls them today. We state this plainly rather than counting
-          them as integrations.
+          Credentials are configured and the adapters now call each service. Copernicus
+          Marine provides point wave data, NASA provides CMR discovery and POWER wind,
+          Sentinel Hub provides authenticated STAC search, AISStream provides bounded live
+          snapshots, and GFW provides delayed apparent-fishing reports. Each result retains
+          the provider-specific caveat that determines what it can honestly prove.
         </td>
       </tr>
       <tr>
@@ -1973,31 +1974,32 @@
         </td>
       </tr>
       <tr>
-        <td><b>Satellite overpass prediction</b><br><span class="pill later">Later</span></td>
+        <td><b>Satellite overpass prediction</b><br><span class="pill built">Built</span></td>
         <td>
           "When will a satellite next photograph this patch of sea?" Answering it needs
-          <b>SGP4</b> — the standard orbital propagator that turns published orbital
-          element sets into a position over time. The data adapter exists; the propagator
-          and its interface panel do not.
+          <b>SGP4</b> — the standard orbital propagator that turns current CelesTrak
+          element sets into a ground track. ORCA now predicts nominal Sentinel-3 and EOS-06
+          swath opportunities in <code>/satellites/overpasses</code> and its interface panel;
+          it explicitly does not claim that an image was tasked, acquired, or cloud-free.
         </td>
       </tr>
       <tr>
-        <td><b>Copernicus Marine, NASA Earthdata, Sentinel Hub</b><br><span class="pill later">Later</span></td>
+        <td><b>Copernicus Marine, NASA Earthdata, Sentinel Hub</b><br><span class="pill built">Built</span></td>
         <td>
-          European and American ocean and satellite archives. Credentials load and the
-          system reports them as available; <b>the adapters that would call them are not
-          written.</b> They would add higher-resolution and historical data, and a second
-          independent source for cross-checking. Roughly one day per adapter.
+          European and American ocean and satellite archives. ORCA calls Copernicus Marine
+          through its official Toolbox, NASA CMR and POWER through their public APIs, and
+          Sentinel Hub through CDSE OAuth and STAC. Catalogue hits are labelled as metadata;
+          only a point read is labelled as a fetched value.
         </td>
       </tr>
       <tr>
-        <td><b>Vessel traffic (AIS) and Global Fishing Watch</b><br><span class="pill later">Later</span></td>
+        <td><b>Vessel traffic (AIS) and Global Fishing Watch</b><br><span class="pill built">Built</span></td>
         <td>
           AIS is the <b>Automatic Identification System</b> — the transponder signal ships
-          broadcast. It would let ORCA warn about collision risk and show fishing
-          activity. Credentials load; adapters unwritten. Note that free-tier AIS coverage
-          over the Indian Ocean is genuinely sparse, so this would show real vessels
-          marked LIVE and demonstration vessels marked SIMULATED, never mixed.
+          broadcast. ORCA takes bounded live AISStream snapshots and queries GFW historical
+          apparent-fishing effort. Free-tier AIS coverage over the Indian Ocean is genuinely
+          sparse, so a zero-vessel snapshot carries that warning and is never treated as proof
+          of empty water. GFW output is delayed and is not proof of fishing or illegality.
         </td>
       </tr>
       <tr>
@@ -2028,13 +2030,12 @@
         </td>
       </tr>
       <tr>
-        <td><b>Broader cross-validation</b><br><span class="pill partial">Partial</span></td>
+        <td><b>Broader cross-validation</b><br><span class="pill built">Built</span></td>
         <td>
-          ORCA compares model sea-surface temperature against satellite sea-surface
-          temperature and tells you whether the sources agree or disagree, with the
-          difference measured against combined uncertainty. It is a genuinely good
-          feature — and it is the <em>only</em> pair that is cross-validated. Extending it
-          to waves and wind needs the second-source adapters above.
+          ORCA compares model sea-surface temperature against satellite SST, wind against
+          temporally aligned NASA POWER wind, and significant wave height against Copernicus
+          Marine. Units and valid times are checked before a comparison. Provider uncertainty
+          is used when supplied; engineering tolerances are named as such when it is not.
         </td>
       </tr>
       <tr>
@@ -2256,7 +2257,7 @@
 
     <dt>SAR — Search and Rescue</dt><dd>Operations to locate and recover people in distress at sea.</dd>
 
-    <dt>SGP4</dt><dd>Simplified General Perturbations model 4. The standard method for calculating where a satellite is from published orbital data. Not yet implemented in ORCA.</dd>
+    <dt>SGP4</dt><dd>Simplified General Perturbations model 4. The standard method ORCA uses to calculate a satellite ground track from current CelesTrak orbital data.</dd>
 
     <dt>Shader</dt><dd>A small program that runs on a graphics card, calculating the position or colour of points and pixels. What draws ORCA's 3D ocean.</dd>
 
@@ -2303,12 +2304,12 @@
   <table>
     <thead><tr><th style="width:62mm">Measure</th><th>Value</th></tr></thead>
     <tbody>
-      <tr><td>Backend code</td><td>~15,200 lines of Python across 43 modules</td></tr>
-      <tr><td>Frontend code</td><td>~9,500 lines of TypeScript, React and CSS across 34 files</td></tr>
-      <tr><td>Automated tests</td><td>312, all passing</td></tr>
-      <tr><td>HTTP endpoints</td><td>47</td></tr>
-      <tr><td>External data sources integrated</td><td>6 built, 8 more with credentials configured and adapters unwritten</td></tr>
-      <tr><td>Agent tools</td><td>8, each with a machine-readable capability description</td></tr>
+      <tr><td>Backend code</td><td>64 Python modules</td></tr>
+      <tr><td>Frontend code</td><td>35 TypeScript, React and CSS files</td></tr>
+      <tr><td>Automated tests</td><td>323 backend + 1 browser end-to-end, all passing</td></tr>
+      <tr><td>HTTP endpoints</td><td>55</td></tr>
+      <tr><td>External data sources integrated</td><td>10 registered source adapters</td></tr>
+      <tr><td>Agent tools</td><td>12, each with a machine-readable capability description</td></tr>
       <tr><td>Languages</td><td>11, all with verified speech synthesis</td></tr>
       <tr><td>Boat classes</td><td>5, with cited limits and a version stamp</td></tr>
       <tr><td>Provenance states</td><td>6</td></tr>

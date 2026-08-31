@@ -123,20 +123,23 @@ engineering maturity and getting caught without them reads as reckless.
    literature, versioned, cited per row, and swap in as a config change.
 5. **Lightning has no free authoritative Indian source.** GOES/GLM does not cover India. We use
    forecast lightning probability and say so.
-6. **AIS coverage over the Indian Ocean is sparse** on the free tier. Real vessels render `LIVE`;
-   the demo fleet renders `SIMULATED`, hatched, and is never silently mixed with live data.
-7. **Konkani has no TTS** in either IndicF5 or Bulbul.
-8. **The lightning veto is CAPE-derived, and CAPE is potential rather than occurrence.** During
+6. **AIS coverage over the Indian Ocean is sparse** on the free tier. A zero-vessel live snapshot
+   is labelled as coverage-limited, never interpreted as empty water. ORCA does not fabricate a
+   fallback fleet.
+7. **A predicted satellite overpass is only a nominal swath opportunity.** It does not prove that
+   an acquisition was tasked, completed, cloud-free, or delivered as a usable product.
+8. **Konkani has no TTS** in either IndicF5 or Bulbul.
+9. **The lightning veto is CAPE-derived, and CAPE is potential rather than occurrence.** During
    the south-west monsoon large stretches of the Indian coast carry 2000–4500 J/kg, which maps
    above the 60% veto and makes ORCA refuse almost everything there. The honest reading of a
    lightning NO-GO is "thunderstorm potential is high across this whole area", not "a storm is
    over your boat". A convective-inhibition gate would sharpen it; it is not implemented.
-9. **Routing coarsens its lattice under the upstream call budget, and a coarser lattice is a MORE
+10. **Routing coarsens its lattice under the upstream call budget, and a coarser lattice is a MORE
    conservative router** — one vetoed 60 km cell blocks a corridor a boat might thread. The
    response says so when it happens.
-10. **Traces do not survive a restart.** `/agent/runs/{id}` replays from an in-process ring
+11. **Traces do not survive a restart.** `/agent/runs/{id}` replays from an in-process ring
     buffer; the `agent_runs`/`agent_steps` tables are not wired.
-11. ORCA is safety-of-life-**adjacent** decision support, not a certified marine safety system.
+12. ORCA is safety-of-life-**adjacent** decision support, not a certified marine safety system.
     Real deployment needs validation against historical incident data and sign-off from a maritime
     safety authority.
 

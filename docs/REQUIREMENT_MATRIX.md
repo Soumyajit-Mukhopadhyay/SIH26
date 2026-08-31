@@ -48,7 +48,7 @@ Unit tests are noted where they pin behaviour that is hard to see from outside â
 | P1-9 | Visual treatments with a performance guard | **Demonstrable** | Seven treatments. The guard measures median frame time and turns a treatment **off** when it cannot hold the budget, rather than displaying a number. |
 | P1-10 | Honest degradation when a source fails | **Demonstrable** | The freshness strip shows sources up/down; a failed tool gets a red row in the trace with its error; the deterministic endpoints keep working when the agent plane fails. |
 | P1-11 | Replayable agent traces | **Partial** | `GET /agent/runs/{id}` replays a full trace, but from an in-process ring buffer â€” traces do not survive a restart. The `agent_runs`/`agent_steps` tables are not wired. |
-| P1-12 | Multi-source cross-validation | **Partial** | Model SST vs satellite SST are compared and the UI says "sources agree" or "sources disagree" with the difference against combined uncertainty. Only this one pair is cross-validated. |
+| P1-12 | Multi-source cross-validation | **Demonstrable** | `GET /validation/point` aligns valid times and units for model-vs-MUR SST, Open-Meteo-vs-NASA POWER wind, and Open-Meteo-vs-CMEMS significant wave height. Provider uncertainty is used where supplied; otherwise the response labels ORCA's cross-model tolerance explicitly. |
 
 ## P2 â€” planned, and where they actually stand
 
@@ -56,8 +56,8 @@ Unit tests are noted where they pin behaviour that is hard to see from outside â
 |---|---|---|---|
 | P2-1 | Persistence layer (SQLite + PostGIS repositories) | **Partial** | PostGIS is probed at startup and the geofence index uses shapely/STRtree when it is absent. The repository layer itself is not written; nothing is persisted between restarts. |
 | P2-2 | Langfuse trace export | **Not built** | Credentials are configured and dormant. |
-| P2-3 | Satellite overpass prediction (SGP4) | **Not built** | TLE adapter exists; the propagator and the panel do not. |
-| P2-4 | CMEMS / NASA Earthdata / AIS / GFW adapters | **Not built** | Credentials are present and reported as dormant capabilities by `/config`. Nothing depends on them. |
+| P2-3 | Satellite overpass prediction (SGP4) | **Demonstrable** | Current CelesTrak GP/TLE records are propagated locally with SGP4 for Sentinel-3A/B and EOS-06; `/satellites/overpasses` and the operational-intelligence panel label results as nominal-swath opportunities, not confirmed acquisitions. |
+| P2-4 | CMEMS / NASA Earthdata / Sentinel Hub / AIS / GFW adapters | **Demonstrable** | Official Copernicus Marine Toolbox point access, NASA CMR discovery and POWER wind, CDSE OAuth + Sentinel Hub STAC, bounded AISStream snapshots, and GFW 4Wings reports are callable. `/integrations/status` states credentials, runtime readiness and caveats without returning secrets. |
 | P2-5 | Authority dashboard (fleet view) | **Not built** | The single-vessel console is complete; a multi-vessel authority view is not. |
 | P2-6 | Offline degradation mode | **Partial** | Rasters and reference geography are on disk and serve without network, and the earth texture is cached, so the map and layers survive a dead connection. There is no explicit offline banner and the point forecast needs the network. |
 | P2-7 | Trip planner (multi-leg) | **Not built** | Single-leg routing works; multi-leg with time windows does not. |

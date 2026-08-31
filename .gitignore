@@ -28,6 +28,7 @@ backend/data/checkpoints/
 node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/test-results/
 *.tsbuildinfo
 
 # --- os / editor ---

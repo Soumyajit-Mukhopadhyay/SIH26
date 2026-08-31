@@ -31,6 +31,7 @@ from orca.api.routes import geofence as geofence_routes
 from orca.api.routes import health as health_routes
 from orca.api.routes import imagery as imagery_routes
 from orca.api.routes import language as language_routes
+from orca.api.routes import operations as operation_routes
 from orca.api.routes import rasters as raster_routes
 from orca.api.routes import routing as routing_routes
 from orca.api.routes import sar as sar_routes
@@ -262,6 +263,7 @@ def create_app() -> FastAPI:
     app.include_router(alert_routes.router)
     app.include_router(language_routes.router)
     app.include_router(geofence_routes.router)
+    app.include_router(operation_routes.router)
 
     @app.get("/", include_in_schema=False)
     async def root() -> dict[str, str]:

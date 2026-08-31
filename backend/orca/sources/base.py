@@ -236,6 +236,7 @@ class Source:
         headers: dict[str, str] | None = None,
         method: str = "GET",
         json_body: Any = None,
+        form_body: dict[str, Any] | None = None,
         conditional: bool = True,
         retries: int | None = None,
         timeout_s: float | None = None,
@@ -281,6 +282,7 @@ class Source:
                     params=params,
                     headers=request_headers,
                     json=json_body,
+                    data=form_body,
                     timeout=effective_timeout,
                 )
             except _TRANSIENT_EXC as exc:

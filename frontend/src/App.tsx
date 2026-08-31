@@ -57,6 +57,7 @@ import { TREATMENT_BY_ID, type TreatmentId } from '@/lib/treatments';
 import { useFrameRate } from '@/hooks/useFrameRate';
 import { LayerRail } from '@/components/LayerRail';
 import { BoundaryPanel } from '@/components/BoundaryPanel';
+import { OperationalIntelPanel } from '@/components/OperationalIntelPanel';
 import { useAgentStream } from '@/hooks/useAgentStream';
 import { useRasterImages } from '@/hooks/useRasterImages';
 import { useParticleFlow } from '@/hooks/useParticleFlow';
@@ -1051,6 +1052,7 @@ export default function App() {
 
         {/* ---------------- top right of the map: SAR mode ---------------- */}
         <div className="pointer-events-none absolute top-3 right-[25.5rem] z-20 flex flex-col items-end gap-2">
+          <OperationalIntelPanel point={selection} />
           <SarPanel
             origin={selection}
             hours={sarHours}
