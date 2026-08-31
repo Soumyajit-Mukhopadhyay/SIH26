@@ -108,9 +108,23 @@ export const api = {
       `/validation/point?${q({ lat, lon, include_wave: includeWave })}`,
     ),
 
-  aisSnapshot: (lat: number, lon: number, radiusDeg = 0.5, durationSeconds = 5) =>
+  aisSnapshot: (
+    lat: number,
+    lon: number,
+    radiusDeg = 0.5,
+    durationSeconds = 5,
+    ownSpeedKn?: number,
+    ownCourseDeg?: number,
+  ) =>
     request<AisSnapshot>(
-      `/traffic/ais?${q({ lat, lon, radius_deg: radiusDeg, duration_seconds: durationSeconds })}`,
+      `/traffic/ais?${q({
+        lat,
+        lon,
+        radius_deg: radiusDeg,
+        duration_seconds: durationSeconds,
+        own_speed_kn: ownSpeedKn,
+        own_course_deg: ownCourseDeg,
+      })}`,
     ),
 
   fishingEffort: (lat: number, lon: number, radiusDeg = 0.5, days = 30) =>
@@ -123,6 +137,9 @@ export const api = {
 
   sentinelCatalogue: (lat: number, lon: number, days = 7) =>
     request<SentinelCatalogueSearch>(`/catalog/sentinel?${q({ lat, lon, days })}`),
+
+  sentinelPreviewUrl: (lat: number, lon: number, days = 7, size = 384) =>
+    `/api/imagery/sentinel/preview?${q({ lat, lon, days, size })}`,
 
   forecastPoint: (lat: number, lon: number, includeSatelliteSst = true) =>
     request<PointForecast>(

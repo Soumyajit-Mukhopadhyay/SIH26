@@ -291,6 +291,25 @@ export interface VesselPosition {
   provenance: Provenance;
 }
 
+export type CollisionLevel = 'danger' | 'warning' | 'monitor' | 'clear' | 'insufficient';
+
+export interface CollisionAdvisory {
+  mmsi: string;
+  name: string | null;
+  level: CollisionLevel;
+  current_distance_nm: number;
+  bearing_deg: number;
+  tcpa_minutes: number | null;
+  dcpa_nm: number | null;
+  reason: string;
+}
+
+export interface OwnMotion {
+  speed_kn: number;
+  course_deg: number;
+  horizon_minutes: number;
+}
+
 export interface AisSnapshot {
   bbox: [number, number, number, number];
   started_at: string;
@@ -298,6 +317,9 @@ export interface AisSnapshot {
   connected: boolean;
   vessels: VesselPosition[];
   raw_position_reports: number;
+  own_motion: OwnMotion | null;
+  collision_advisories: CollisionAdvisory[];
+  collision_summary: Record<CollisionLevel, number>;
   provenance: Provenance;
   error: string | null;
   coverage_note: string;

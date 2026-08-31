@@ -125,7 +125,8 @@ engineering maturity and getting caught without them reads as reckless.
    forecast lightning probability and say so.
 6. **AIS coverage over the Indian Ocean is sparse** on the free tier. A zero-vessel live snapshot
    is labelled as coverage-limited, never interpreted as empty water. ORCA does not fabricate a
-   fallback fleet.
+   fallback fleet. CPA/TCPA warnings assume both vessels keep a constant reported course and
+   speed; they are screening advisories, not certified collision-avoidance instructions.
 7. **A predicted satellite overpass is only a nominal swath opportunity.** It does not prove that
    an acquisition was tasked, completed, cloud-free, or delivered as a usable product.
 8. **Konkani has no TTS** in either IndicF5 or Bulbul.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -16,6 +17,19 @@ TOKEN_URL = (
     "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
 )
 CATALOG_URL = "https://sh.dataspace.copernicus.eu/catalog/v1/search"
+PROCESS_URL = "https://sh.dataspace.copernicus.eu/process/v1"
+
+TRUE_COLOUR_EVALSCRIPT = """//VERSION=3
+function setup() {
+  return {
+    input: ["B08", "B06", "B04", "dataMask"],
+    output: { bands: 4, sampleType: "AUTO" }
+  };
+}
+function evaluatePixel(sample) {
+  return [2.5 * sample.B08, 2.5 * sample.B06, 2.5 * sample.B04, sample.dataMask];
+}
+"""
 
 
 class SentinelItem(BaseModel):
@@ -36,6 +50,15 @@ class SentinelSearchResponse(BaseModel):
     items: list[SentinelItem]
     provenance: str
     note: str
+
+
+@dataclass(frozen=True, slots=True)
+class SentinelPreview:
+    content: bytes
+    item_id: str
+    acquired_at: datetime
+    bbox: tuple[float, float, float, float]
+    provenance: str
 
 
 def _dt(value: Any) -> datetime | None:
@@ -152,6 +175,89 @@ class SentinelHubSource(Source):
                 "Catalogue matches prove that products exist for this area and time. They do "
                 "not mean ORCA downloaded or processed those products."
             ),
+        )
+
+    async def preview(
+        self,
+        lat: float,
+        lon: float,
+        *,
+        days: int = 7,
+        radius_deg: float = 0.2,
+        size: int = 384,
+    ) -> SentinelPreview:
+        """Process a small true-colour PNG from the latest catalogued OLCI acquisition."""
+        if not -90 <= lat <= 90 or not -180 <= lon <= 180:
+            raise ValueError("latitude/longitude outside WGS84 range")
+        if not 1 <= days <= 90 or not 128 <= size <= 768:
+            raise ValueError("days must be 1-90 and size must be 128-768 pixels")
+        now = utcnow()
+        bbox = (
+            max(-180.0, lon - radius_deg),
+            max(-90.0, lat - radius_deg),
+            min(180.0, lon + radius_deg),
+            min(90.0, lat + radius_deg),
+        )
+        catalogue = await self.search(
+            "sentinel-3-olci", bbox, now - timedelta(days=days), now, limit=20
+        )
+        candidates = [item for item in catalogue.items if item.acquired_at is not None]
+        if not candidates:
+            raise LookupError("no Sentinel-3 OLCI product covers this area in the requested window")
+        selected = max(
+            candidates, key=lambda item: item.acquired_at or datetime.min.replace(tzinfo=UTC)
+        )
+        assert selected.acquired_at is not None
+        token = await self._access_token()
+        result = await self.fetch(
+            PROCESS_URL,
+            method="POST",
+            headers={"Authorization": f"Bearer {token}"},
+            json_body={
+                "input": {
+                    "bounds": {
+                        "bbox": list(bbox),
+                        "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/4326"},
+                    },
+                    "data": [
+                        {
+                            "type": "sentinel-3-olci",
+                            "dataFilter": {
+                                "timeRange": {
+                                    "from": (
+                                        selected.acquired_at - timedelta(minutes=15)
+                                    ).isoformat(),
+                                    "to": (
+                                        selected.acquired_at + timedelta(minutes=15)
+                                    ).isoformat(),
+                                },
+                                "mosaickingOrder": "mostRecent",
+                            },
+                        }
+                    ],
+                },
+                "output": {
+                    "width": size,
+                    "height": size,
+                    "responses": [{"format": {"type": "image/png"}}],
+                },
+                "evalscript": TRUE_COLOUR_EVALSCRIPT,
+            },
+            conditional=False,
+            retries=1,
+            timeout_s=40,
+            expect_binary=True,
+        )
+        if not result.ok:
+            raise RuntimeError(result.error or f"Sentinel Hub Process returned {result.status}")
+        if not result.content.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("Sentinel Hub Process response was not a valid PNG")
+        return SentinelPreview(
+            content=result.content,
+            item_id=selected.item_id,
+            acquired_at=selected.acquired_at,
+            bbox=bbox,
+            provenance=result.provenance.value,
         )
 
 

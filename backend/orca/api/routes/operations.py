@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from orca.config import get_settings
@@ -132,6 +132,35 @@ async def sentinel_catalogue(
         raise HTTPException(status_code=status, detail=str(exc)) from exc
 
 
+@router.get(
+    "/imagery/sentinel/preview",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def sentinel_preview(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    days: int = Query(7, ge=1, le=90),
+    size: int = Query(384, ge=128, le=768),
+) -> Response:
+    try:
+        preview = await sentinel_hub.preview(lat, lon, days=days, size=size)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        status = 503 if "not configured" in str(exc).lower() else 502
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    return Response(
+        content=preview.content,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, max-age=900",
+            "X-ORCA-Acquired-At": preview.acquired_at.isoformat(),
+            "X-ORCA-Provenance": preview.provenance,
+        },
+    )
+
+
 @router.get("/catalog/cmems", response_model=CmemsCatalogueResponse)
 async def cmems_catalogue(
     query: str = Query("Indian Ocean", min_length=2, max_length=100),
@@ -149,8 +178,19 @@ async def ais_snapshot(
     lon: float = Query(..., ge=-180, le=180),
     radius_deg: float = Query(0.5, gt=0, le=10),
     duration_seconds: float = Query(5, ge=1, le=15),
+    own_speed_kn: float | None = Query(default=None, ge=0, le=60),
+    own_course_deg: float | None = Query(default=None, ge=0, lt=360),
+    collision_horizon_minutes: float = Query(30, gt=0, le=120),
 ) -> AisSnapshot:
-    return await aisstream.snapshot(_bbox(lat, lon, radius_deg), duration_seconds=duration_seconds)
+    return await aisstream.snapshot(
+        _bbox(lat, lon, radius_deg),
+        duration_seconds=duration_seconds,
+        own_lat=lat,
+        own_lon=lon,
+        own_speed_kn=own_speed_kn,
+        own_course_deg=own_course_deg,
+        collision_horizon_minutes=collision_horizon_minutes,
+    )
 
 
 @router.get("/traffic/fishing-effort", response_model=FishingEffortResponse)

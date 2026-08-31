@@ -15,7 +15,7 @@ from sgp4.api import Satrec
 from orca.provenance import Evidence, Freshness, Provenance
 from orca.services.cross_validation import ValidationStatus, compare
 from orca.services.overpass import SatelliteSpec, _daylight_at, predict_for_tle, subpoint
-from orca.sources.ais import parse_position
+from orca.sources.ais import VesselPosition, assess_collision, parse_position
 from orca.sources.base import Fetched
 from orca.sources.celestrak import TleRecord
 from orca.sources.nasa import _size_megabytes
@@ -135,6 +135,28 @@ def test_ais_position_parser_rejects_sentinels_and_preserves_live_coordinates() 
     assert position.speed_kn == 8.2
     assert position.heading_deg is None
     assert position.provenance is Provenance.LIVE
+
+
+def test_collision_screen_detects_a_head_on_closest_approach() -> None:
+    target = VesselPosition(
+        mmsi="419000002",
+        lat=0,
+        lon=0.1,
+        speed_kn=10,
+        course_deg=270,
+        message_type="PositionReport",
+        received_at=EPOCH,
+    )
+    advisory = assess_collision(
+        0,
+        0,
+        target,
+        own_speed_kn=10,
+        own_course_deg=90,
+    )
+    assert advisory.level == "danger"
+    assert advisory.dcpa_nm == pytest.approx(0, abs=0.01)
+    assert advisory.tcpa_minutes == pytest.approx(18.03, abs=0.1)
 
 
 @pytest.mark.asyncio
@@ -265,3 +287,55 @@ async def test_sentinel_oauth_and_catalogue_shapes_are_parsed(monkeypatch) -> No
     assert result.returned == 1
     assert result.items[0].item_id == "S3-test"
     assert result.items[0].acquired_at == datetime(2026, 8, 31, 4, 30, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_sentinel_preview_uses_catalogued_acquisition_window(monkeypatch) -> None:
+    import orca.sources.sentinel_hub as module
+
+    source = module.SentinelHubSource()
+    acquired = datetime(2026, 8, 31, 4, 30, tzinfo=UTC)
+
+    async def fake_search(*_args, **_kwargs):
+        return module.SentinelSearchResponse(
+            collection="sentinel-3-olci",
+            bbox=(80.2, 12.9, 80.6, 13.3),
+            start_time=acquired - timedelta(days=1),
+            end_time=acquired,
+            returned=1,
+            items=[
+                module.SentinelItem(
+                    item_id="S3-test",
+                    collection="sentinel-3-olci",
+                    acquired_at=acquired,
+                    bbox=[80.2, 12.9, 80.6, 13.3],
+                )
+            ],
+            provenance="live",
+            note="test",
+        )
+
+    async def fake_token():
+        return "token"
+
+    captured: dict[str, object] = {}
+
+    async def fake_fetch(*_args, **kwargs):
+        captured.update(kwargs)
+        return Fetched(
+            ok=True,
+            source=source.name,
+            url=module.PROCESS_URL,
+            status=200,
+            content=b"\x89PNG\r\n\x1a\npreview",
+        )
+
+    monkeypatch.setattr(source, "search", fake_search)
+    monkeypatch.setattr(source, "_access_token", fake_token)
+    monkeypatch.setattr(source, "fetch", fake_fetch)
+    preview = await source.preview(13.1, 80.4)
+    assert preview.item_id == "S3-test"
+    assert preview.content.startswith(b"\x89PNG")
+    body = captured["json_body"]
+    assert isinstance(body, dict)
+    assert body["input"]["data"][0]["type"] == "sentinel-3-olci"
