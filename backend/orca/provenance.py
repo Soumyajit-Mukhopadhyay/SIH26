@@ -76,6 +76,7 @@ class Provider(StrEnum):
     USGS = "USGS"
     GFW = "GFW"
     AISSTREAM = "AISStream"
+    WORLD_TIDES = "WorldTides"
     MARINE_REGIONS = "Marine Regions"
     PROTECTED_PLANET = "Protected Planet"
     GEBCO = "GEBCO"
@@ -128,6 +129,8 @@ STALENESS_HOURS: dict[str, float] = {
     "earthquake": 1.0,
     "ais_position": 0.25,
     "fishing_effort": 168.0,
+    "tide_height": 6.0,
+    "tide_extreme": 24.0,
     # orbital elements — SGP4 accuracy decays with TLE age
     "tle": 72.0,
 }

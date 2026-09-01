@@ -82,6 +82,15 @@ test('operational panel calls and renders every new browser endpoint', async ({ 
   await expect.poll(() => [...requested]).toContain('/api/satellites/overpasses');
   await page.waitForTimeout(500);
   expect(applicationErrors(pageErrors)).toEqual([]);
+
+  await expect(page.getByText('test only')).toBeVisible();
+  await page.getByRole('button', { name: 'Collapse safety verdict' }).click();
+  await expect(page.getByRole('button', { name: 'Expand safety verdict' })).toBeVisible();
+  await expect(page.getByText('test only')).toBeHidden();
+  await page.getByRole('button', { name: 'Expand safety verdict' }).click();
+  await expect(page.getByText('test only')).toBeVisible();
+  await expect(page.getByText(/deterministic rule engine/i)).toHaveCount(0);
+
   await page.getByRole('button', { name: /Orbital & vessel intelligence/ }).click();
   await expect(page.getByText(/Sentinel-3A/).first()).toBeVisible();
   await expect(page.getByText(/Opportunity only/)).toBeVisible();

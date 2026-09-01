@@ -4,14 +4,11 @@
  * What it has to communicate, in order of priority:
  *
  * 1. The verdict, unmissable.
- * 2. **That a rule engine decided, not a language model.** Stated on the card,
- *    not buried in an about page — it is the central engineering claim, and a
- *    judge should not have to ask.
- * 3. The vetoes, verbatim. "Hs 2.4 m is at or over the 1.5 m limit for your 8.2 m
+ * 2. The vetoes, verbatim. "Hs 2.4 m is at or over the 1.5 m limit for your 8.2 m
  *    boat" is the most valuable string in the system: it teaches the user
  *    something true and shows that the reasoning is a computation.
- * 4. What would change it — the part a fisherman actually acts on.
- * 5. The arithmetic, on demand.
+ * 3. What would change it — the part a fisherman actually acts on.
+ * 4. The arithmetic, on demand.
  *
  * UNVERIFIABLE is a first-class verdict here, rendered distinctly from NO-GO.
  * "We cannot check" and "it is dangerous" are different messages and collapsing
@@ -24,7 +21,6 @@ import {
   Ban,
   CheckCircle2,
   ChevronDown,
-  Cpu,
   HelpCircle,
   Info,
   Radio,
@@ -87,11 +83,12 @@ const COMPONENT_LABELS: Record<string, string> = {
   wave: 'Significant wave height',
   wind: 'Wind speed',
   visibility: 'Visibility',
-  lightning: 'Lightning / convective',
+  lightning: 'Convective potential (CAPE proxy)',
 };
 
 export function VerdictCard({ result, compact = false }: { result: RiskResult; compact?: boolean }) {
   const [showMath, setShowMath] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const style = VERDICT_STYLES[result.verdict];
   const Icon = style.icon;
 
@@ -117,8 +114,23 @@ export function VerdictCard({ result, compact = false }: { result: RiskResult; c
           </div>
           <p className="text-ink-1 mt-1 text-xs leading-snug">{style.sub}</p>
         </div>
+        <button
+          type="button"
+          onClick={() => setCollapsed((value) => !value)}
+          className="text-ink-2 hover:bg-abyss-2/70 hover:text-cyan -mt-1 -mr-1 rounded p-1.5 transition-colors"
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Expand safety verdict' : 'Collapse safety verdict'}
+          title={collapsed ? 'Expand safety verdict' : 'Collapse safety verdict'}
+        >
+          <ChevronDown
+            className={clsx('h-4 w-4 transition-transform', !collapsed && 'rotate-180')}
+            aria-hidden
+          />
+        </button>
       </div>
 
+      {!collapsed && (
+        <>
       {/* ---- index bar ---- */}
       {result.verdict !== 'UNVERIFIABLE' && (
         <div className="px-4 pb-3">
@@ -139,15 +151,6 @@ export function VerdictCard({ result, compact = false }: { result: RiskResult; c
           </div>
         </div>
       )}
-
-      {/* ---- the central claim, stated on the card ---- */}
-      <div className="border-hairline text-ink-2 flex items-center gap-1.5 border-y px-4 py-2 text-2xs">
-        <Cpu className="text-cyan h-3 w-3 shrink-0" aria-hidden />
-        <span>
-          Decided by a deterministic rule engine — <span className="text-ink-1">no language model</span>.
-        </span>
-        <span className="data text-ink-3 ml-auto shrink-0">{result.thresholds_version}</span>
-      </div>
 
       {/* ---- vetoes: the most valuable strings in the system ---- */}
       {result.vetoes.length > 0 && (
@@ -304,6 +307,8 @@ export function VerdictCard({ result, compact = false }: { result: RiskResult; c
           <span>{result.disclaimer}</span>
         </p>
       </div>
+        </>
+      )}
     </div>
   );
 }

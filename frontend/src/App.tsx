@@ -1147,9 +1147,9 @@ export default function App() {
                 Click anywhere on the sea
               </h1>
               <p className="text-ink-1 text-xs leading-relaxed">
-                ORCA pulls live wave, wind, visibility and convective data for that point, computes
-                a GO / NO-GO with a deterministic rule engine, and shows you every number it used —
-                with its source, its age and its provenance state.
+                ORCA pulls live wave, wind, visibility and convective data for that point, calculates
+                a GO / NO-GO assessment, and shows you every number it used — with its source, its
+                age and its provenance state.
               </p>
               <p className="text-ink-3 mt-3 text-2xs leading-snug">
                 Coverage is the Indian EEZ envelope, {AOI.west}–{AOI.east}°E and {AOI.south}–

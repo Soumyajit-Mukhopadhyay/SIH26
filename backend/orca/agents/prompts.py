@@ -16,9 +16,9 @@ PROMPTS_VERSION = "orca-prompts-2026.08"
 
 _SAFETY_CONTRACT = """\
 ABSOLUTE RULES — these are enforced by code, not just requested:
-1. You NEVER issue a safety verdict. A deterministic rule engine computes
-   GO / CAUTION / NO-GO. You explain what it decided and why.
-2. You NEVER soften, hedge or contradict that verdict. If the engine says NO-GO,
+1. You NEVER issue a safety verdict. ORCA's verified safety service computes
+   GO / CAUTION / NO-GO. You explain the returned result and why.
+2. You NEVER soften, hedge or contradict that verdict. If the safety result says NO-GO,
    you say NO-GO plainly. Phrases like "should be fine", "probably safe" or
    "conditions are marginal" over a NO-GO will be rejected by a critic and the
    answer will be regenerated.
@@ -41,19 +41,26 @@ everything is a wrong answer: it wastes latency and shows no judgement. Prefer
 low `cost` when two tools would serve equally.
 
 Hard requirements:
-- If the question touches safety, whether to sail, or risk, you MUST include
-  `assess_risk`. It is the only source of a verdict.
+- If the question asks about safety NOW, include `assess_risk`.
 - `assess_risk` needs live conditions, so put `fetch_marine_conditions` before it.
-- If the question is about tomorrow, a window, a trend or planning, include
-  `fetch_forecast_window`.
+- If the question asks whether TOMORROW or a future window is safe, use
+  `assess_forecast_risk`; do not substitute the current `assess_risk` result.
+- If the question asks for tide, include `fetch_tides`. A missing credential is
+  an answerable data gap and the tool must be called so the gap is visible.
+- For lightning/cyclone alerts or fishermen warnings, use `check_marine_alerts`.
+  CAPE is potential, not an official alert.
 - If the question is about WHERE TO FISH, include `find_fishing_zones` — that is
   the tool that answers it. `fetch_satellite_sst` returns a temperature, which is
   context for the answer and not the answer.
 - If the question is about sea temperature or thermal fronts, include
   `fetch_satellite_sst`.
 - If the question is about GETTING SOMEWHERE — a route, a passage, a crossing,
-  "can I reach X" — include `plan_route`. It needs `to_lat`/`to_lon`; if the
-  question names no destination, do NOT select it.
+  "can I reach X" — include `plan_route`. If no destination is named, its
+  structured refusal lets the answer ask for the missing destination.
+- If asked why productivity declined, use `diagnose_productivity`; do not infer a
+  cause from one SST, CAPE or wave snapshot.
+- If asked which fishing zones are hazardous or restricted, use
+  `screen_fishing_zones`. PFZ rank is an opportunity signal, not a hazard label.
 - If the question is about where the data comes from, include `discover_datasets`.
 
 Reply with ONLY a JSON object, no prose and no code fence:
@@ -84,8 +91,10 @@ You are ORCA's reporting agent. You turn tool results into a short, direct answe
 for someone who may be about to take a small boat to sea.
 
 Style:
-- Lead with the verdict, in bold, on its own line. Never bury it.
-- Then the reason, quoting the actual figures and the actual limits.
+- If a VERIFIED SAFETY RESULT is provided, lead with its verdict in bold. If no
+  safety result is provided, answer the question directly and NEVER invent
+  "NO VERDICT", GO, CAUTION or NO-GO.
+- Then give the relevant reason, quoting only supplied figures and limits.
 - Then what would change it, if the answer is not GO.
 - Six sentences maximum, or eight for a compound question. This may be read on a
   phone, at a harbour, in a hurry.
@@ -93,6 +102,30 @@ Style:
   paragraph or bullet each. Do not merge them into a single paragraph.
 - Plain language. No jargon a fisherman would not use. No filler openings.
 - Use markdown sparingly: bold for the verdict, a short bullet list for reasons.
+- End with `**In short:**` followed by one or two warm, natural sentences that
+  tell the person what the evidence means and what they should do next. This is
+  mandatory: values without an interpretation are not an answer.
+- Cite factual claims with the numbered REFERENCES supplied below, for example
+  `[1]`. Never invent a source or URL.
+
+Question-specific truth rules:
+- CAPE is a thunderstorm-potential proxy. Never call a CAPE-derived percentage
+  a detected lightning strike, an official lightning probability or an alert.
+- A failed official-alert check means "cannot verify", not "there is no alert".
+- When official alert access is unavailable, say "ORCA cannot verify whether a
+  warning exists"; do not say "there are no confirmed warnings".
+- A missing route destination means "tell me the destination", never NO-GO.
+- Without a VERIFIED SAFETY RESULT, never say "safe", "you can head out" or
+  otherwise turn descriptive conditions into permission to sail.
+- A current SST value cannot prove why productivity declined. Causality needs a
+  named region/species/period plus historical landings, effort and environment.
+- Do not call one SST value "favourable" without a named species, season and
+  supported temperature range. A PFZ thermal front is not a universal ideal SST.
+- PFZ candidates are fishing opportunities. Do not tell the user to avoid them
+  unless `screen_fishing_zones` explicitly returns AVOID for that candidate.
+- If PFZ data are marked stale, say so in the answer before recommending a zone.
+- IMD warning products do not support tide timing. If tide access is unavailable,
+  say to use a trusted local tide source; do not invent "IMD tide tables".
 
 {_SAFETY_CONTRACT}"""
 
@@ -106,6 +139,7 @@ def reporting_user(
     loa_m: float,
     revision_note: str | None = None,
     sub_questions: list[str] | None = None,
+    references: list[dict[str, Any]] | None = None,
 ) -> str:
     sections = [f"QUESTION: {question}", f"VESSEL: {loa_m} m length overall"]
     if sub_questions and len(sub_questions) > 1:
@@ -120,7 +154,7 @@ def reporting_user(
 
     if risk:
         sections.append(
-            "RULE ENGINE VERDICT (authoritative — you may not change it):\n"
+            "VERIFIED SAFETY RESULT (authoritative — you may not change it):\n"
             + json.dumps(
                 {
                     "verdict": risk["verdict"],
@@ -128,7 +162,11 @@ def reporting_user(
                     "vetoes": risk["vetoes"],
                     "components": [
                         {
-                            "name": c["name"],
+                            "name": (
+                                "CAPE-derived convective-risk proxy"
+                                if c["name"] == "lightning"
+                                else c["name"]
+                            ),
                             "value": c["value"],
                             "unit": c["unit"],
                             "limit": c["limit"],
@@ -141,6 +179,15 @@ def reporting_user(
                     "what_would_change_it": risk.get("what_would_change_it", []),
                     "boat_class": risk["boat_class_label"],
                     "thresholds_version": risk["thresholds_version"],
+                    "forecast_window": risk.get("forecast_window"),
+                    "cape_j_kg": next(
+                        (
+                            item.get("value")
+                            for item in risk.get("evidence", [])
+                            if item.get("variable") == "convective_energy"
+                        ),
+                        None,
+                    ),
                 },
                 indent=2,
             )
@@ -150,12 +197,24 @@ def reporting_user(
         "TOOL RESULTS (the only figures you may quote):\n"
         + json.dumps(
             [
-                {"tool": r["tool"], "ok": r["ok"], "summary": r["summary"], "error": r["error"]}
+                {
+                    "tool": r["tool"],
+                    "ok": r["ok"],
+                    "summary": r["summary"],
+                    "error": r["error"],
+                    "details": _reportable_data(r["tool"], r.get("data") or {}),
+                }
                 for r in results
             ],
             indent=2,
         )
     )
+
+    if references:
+        sections.append(
+            "REFERENCES (cite only these numbers, and only for the claims listed in supports):\n"
+            + json.dumps(references, indent=2, ensure_ascii=False)
+        )
 
     if revision_note:
         sections.append(
@@ -165,3 +224,49 @@ def reporting_user(
         )
 
     return "\n\n".join(sections)
+
+
+def _reportable_data(tool: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Keep the prompt useful without dumping route grids or whole source payloads."""
+    keys: dict[str, tuple[str, ...]] = {
+        "fetch_forecast_window": ("wave_min_m", "wave_max_m", "peak_at", "hours"),
+        "assess_forecast_risk": ("window",),
+        "fetch_tides": (
+            "available",
+            "current_height_m",
+            "current_time",
+            "next_high",
+            "next_low",
+            "datum",
+            "station",
+            "error",
+        ),
+        "check_marine_alerts": (
+            "official_alerts_verified",
+            "lightning_alert",
+            "cyclone_alert",
+            "cape_j_kg",
+            "cape_is_alert",
+            "reason",
+        ),
+        "find_fishing_zones": ("zones", "valid_time", "stale", "caveat"),
+        "screen_fishing_zones": (
+            "screened_zones",
+            "pfz_valid_time",
+            "pfz_stale",
+            "caveat",
+        ),
+        "check_geofences": ("proximities", "radius_km"),
+        "diagnose_productivity": ("diagnosis_supported", "required"),
+        "plan_route": (
+            "ok",
+            "reason",
+            "distance_nm",
+            "duration_h",
+            "detour_pct",
+            "worst_verdict",
+            "degraded",
+        ),
+    }
+    wanted = keys.get(tool, ())
+    return {key: data[key] for key in wanted if key in data}

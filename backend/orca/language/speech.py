@@ -294,27 +294,35 @@ async def _groq_asr(audio: bytes, filename: str, language: str) -> str:
     if not settings.has_groq:
         raise SpeechUnavailable("GROQ_API_KEY is not configured")
     client = await get_client()
-    response = await client.post(
-        GROQ_ASR_URL,
-        headers={
-            "Authorization": f"Bearer {settings.groq_api_key.get_secret_value()}"  # type: ignore[union-attr]
-        },
-        files={"file": (filename, audio, "audio/wav")},
-        data={
-            "model": WHISPER_MODEL,
-            # Whisper can detect the language, but naming it materially improves
-            # accuracy on short clips, which is what a mic press produces.
-            "language": language,
-            "response_format": "json",
-        },
-        timeout=120.0,
-    )
-    if response.status_code >= 400:
-        raise SpeechUnavailable(f"Groq ASR HTTP {response.status_code}: {response.text[:180]}")
-    text = response.json().get("text")
-    if not text:
-        raise SpeechUnavailable("Groq ASR returned no text")
-    return str(text)
+    keys = [
+        key.get_secret_value()
+        for key in (settings.groq_api_key_primary, settings.groq_api_key)
+        if key is not None
+    ]
+    attempts: list[str] = []
+    for index, key in enumerate(keys):
+        response = await client.post(
+            GROQ_ASR_URL,
+            headers={"Authorization": f"Bearer {key}"},
+            files={"file": (filename, audio, "audio/wav")},
+            data={
+                "model": WHISPER_MODEL,
+                # Whisper can detect the language, but naming it materially improves
+                # accuracy on short clips, which is what a mic press produces.
+                "language": language,
+                "response_format": "json",
+            },
+            timeout=120.0,
+        )
+        label = "primary" if index == 0 else "fallback"
+        if response.status_code >= 400:
+            attempts.append(f"{label} HTTP {response.status_code}: {response.text[:180]}")
+            continue
+        text = response.json().get("text")
+        if text:
+            return str(text)
+        attempts.append(f"{label} returned no text")
+    raise SpeechUnavailable("Groq ASR failed (" + "; ".join(attempts) + ")")
 
 
 async def transcribe(

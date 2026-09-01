@@ -1,4 +1,4 @@
-"""The LLM provider router: Groq -> Gemini -> OpenRouter -> Ollama.
+"""The LLM provider router: Groq primary -> Groq backup -> Gemini -> OpenRouter -> Ollama.
 
 Real fallback, not a config comment. Each provider is tried in order and a
 failure moves to the next one, because on demo day the failure mode that
@@ -67,12 +67,20 @@ PROVIDERS: tuple[LlmSpec, ...] = (
         name="groq",
         model="openai/gpt-oss-120b",
         base_url="https://api.groq.com/openai/v1/chat/completions",
-        key_attr="groq_api_key",
+        key_attr="groq_api_key_primary",
         reasoning_effort="low",
         notes=(
             "Primary. Verified available, fast, tool-calling. A reasoning model, so "
             "`reasoning_effort` is set — see the field's note."
         ),
+    ),
+    LlmSpec(
+        name="groq-fallback",
+        model="openai/gpt-oss-120b",
+        base_url="https://api.groq.com/openai/v1/chat/completions",
+        key_attr="groq_api_key",
+        reasoning_effort="low",
+        notes="Backup Groq credential. Tried only after the primary Groq key fails.",
     ),
     LlmSpec(
         name="gemini",

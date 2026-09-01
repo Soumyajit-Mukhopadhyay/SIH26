@@ -40,6 +40,9 @@ def test_conditions_are_ordered_before_the_verdict() -> None:
 
     assert TOOL_ORDER.index("fetch_marine_conditions") < TOOL_ORDER.index("assess_risk")
     assert TOOL_ORDER.index("assess_risk") < TOOL_ORDER.index("plan_route")
+    assert TOOL_ORDER.index("fetch_forecast_window") < TOOL_ORDER.index(
+        "assess_forecast_risk"
+    )
 
 
 def test_ordered_puts_unknown_names_last_rather_than_dropping_them() -> None:
@@ -70,3 +73,39 @@ def test_plan_route_refuses_without_a_destination() -> None:
     result = asyncio.run(run_tool("plan_route", lat=13.0, lon=80.5))
     assert result.ok is False
     assert "destination" in (result.error or "").lower()
+
+
+def test_the_seven_problem_statement_queries_select_the_required_tools() -> None:
+    """Regression test for the seven questions shown in the SIH problem statement."""
+    from orca.agents.multiquery import split_heuristic
+
+    cases = {
+        "Is it safe to venture into the sea tomorrow morning?": {
+            "fetch_forecast_window",
+            "assess_forecast_risk",
+        },
+        "What are the tide, weather, and sea conditions near my fishing location?": {
+            "fetch_marine_conditions",
+            "fetch_tides",
+        },
+        "Are there any lightning or cyclone alerts in my area?": {"check_marine_alerts"},
+        (
+            "Which regions show high chlorophyll concentration and favourable sea surface "
+            "temperature?"
+        ): {"find_fishing_zones", "fetch_satellite_sst"},
+        (
+            "What is the safest route for a fishing vessel considering weather and sea-state "
+            "conditions?"
+        ): {"plan_route"},
+        "Why has fish productivity declined in a particular coastal region?": {
+            "diagnose_productivity"
+        },
+        (
+            "Which fishing zones should be avoided due to hazardous marine conditions or "
+            "geofencing restrictions?"
+        ): {"screen_fishing_zones"},
+    }
+
+    for question, required in cases.items():
+        selected = set(split_heuristic(question).tools)
+        assert required <= selected, f"{question!r} selected {selected}, missing {required - selected}"

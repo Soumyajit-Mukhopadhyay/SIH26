@@ -11,17 +11,32 @@
 
 import type { ReactNode } from 'react';
 
-/** Bold spans, in a single line of text. */
+/** Bold spans and safe source links, in a single line of text. */
 export function inline(text: string): ReactNode {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
-    part.startsWith('**') && part.endsWith('**') ? (
-      <strong key={index} className="text-ink-0 font-semibold">
-        {part.slice(2, -2)}
-      </strong>
-    ) : (
-      <span key={index}>{part}</span>
-    ),
-  );
+  return text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g).map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={index} className="text-ink-0 font-semibold">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    const link = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(part);
+    if (link) {
+      return (
+        <a
+          key={index}
+          href={link[2]}
+          target="_blank"
+          rel="noreferrer"
+          className="text-cyan underline decoration-cyan/40 underline-offset-2 hover:decoration-cyan"
+        >
+          {link[1]}
+        </a>
+      );
+    }
+    return <span key={index}>{part}</span>;
+  });
 }
 
 /**

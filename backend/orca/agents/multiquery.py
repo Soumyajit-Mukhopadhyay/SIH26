@@ -34,8 +34,13 @@ log = logging.getLogger(__name__)
 
 Intent = Literal[
     "safety",
+    "future_safety",
+    "conditions",
+    "alerts",
     "forecast",
     "fishing",
+    "restricted_zones",
+    "productivity",
     "routing",
     "boundary",
     "provenance",
@@ -52,14 +57,18 @@ Intent = Literal[
 #: `answers` field so the two cannot drift apart silently.
 INTENT_TOOLS: dict[Intent, tuple[str, ...]] = {
     "safety": ("fetch_marine_conditions", "assess_risk"),
+    "future_safety": ("fetch_forecast_window", "assess_forecast_risk"),
+    "conditions": ("fetch_marine_conditions", "fetch_tides"),
+    "alerts": ("check_marine_alerts",),
     "forecast": ("fetch_forecast_window",),
     # The PFZ tool answers the question; satellite SST is context for it.
     "fishing": ("find_fishing_zones", "fetch_satellite_sst"),
-    # `plan_route` needs a destination, so the conditions tool goes with it: if no
-    # destination can be resolved the answer still has something to say about the
-    # water where the user actually is.
-    "routing": ("plan_route", "fetch_marine_conditions"),
-    "boundary": ("fetch_marine_conditions",),
+    "restricted_zones": ("screen_fishing_zones",),
+    "productivity": ("diagnose_productivity",),
+    # `plan_route` asks for a destination when one is absent. Current conditions
+    # are not a substitute for a route and must not become an implied clearance.
+    "routing": ("plan_route",),
+    "boundary": ("check_geofences",),
     "provenance": ("discover_datasets",),
     "thresholds": ("lookup_boat_thresholds",),
     "overpass": ("predict_satellite_overpasses",),
@@ -88,6 +97,23 @@ _HINTS: dict[Intent, tuple[str, ...]] = {
         "surakshit",
         "suraksha",
     ),
+    "future_safety": (),
+    "conditions": (
+        "tide",
+        "high tide",
+        "low tide",
+        "sea conditions",
+        "marine conditions",
+        "weather conditions",
+    ),
+    "alerts": (
+        "alert",
+        "warning",
+        "lightning",
+        "cyclone",
+        "thunderstorm alert",
+        "fishermen warning",
+    ),
     "forecast": (
         "tomorrow",
         "tonight",
@@ -115,6 +141,22 @@ _HINTS: dict[Intent, tuple[str, ...]] = {
         "where should i fish",
         "machhli",
         "chepa",
+    ),
+    "restricted_zones": (
+        "zones should be avoided",
+        "zones to avoid",
+        "avoid fishing zones",
+        "geofencing restrictions",
+        "restricted fishing zones",
+        "hazardous fishing zones",
+    ),
+    "productivity": (
+        "productivity declined",
+        "productivity decline",
+        "catch declined",
+        "catch decline",
+        "fewer fish",
+        "fish decline",
     ),
     "routing": (
         "route",
@@ -210,7 +252,9 @@ _HINTS: dict[Intent, tuple[str, ...]] = {
 #: support. A romanised or native "and" is a genuine clause boundary.
 _SPLITTERS = (
     r"\band also\b",
-    r"\band\b",
+    # A bare "and" often joins nouns ("wind and waves"), not requests. Split it
+    # only when the next words begin another question or command.
+    r"\band(?=\s+(?:what|where|when|why|how|is|are|can|could|should|do|does|will|would|tell|show|find|check)\b)",
     r"\balso\b",
     r"\bplus\b",
     r"\bthen\b",
@@ -278,6 +322,23 @@ def _classify(text: str) -> Intent:
     for intent, hints in _HINTS.items():
         scores[intent] = sum(1 for hint in hints if hint in lowered)
 
+    # Composite intents are more specific than their individual words. Without
+    # these precedence rules, "safest route" ties safety and routing and loses
+    # the route, while "lightning alert" gets mistaken for a generic safety
+    # question and turns CAPE into an alert.
+    if scores.get("restricted_zones", 0):
+        return "restricted_zones"
+    if scores.get("productivity", 0):
+        return "productivity"
+    if scores.get("alerts", 0):
+        return "alerts"
+    if scores.get("routing", 0):
+        return "routing"
+    if scores.get("safety", 0) and scores.get("forecast", 0):
+        return "future_safety"
+    if scores.get("conditions", 0) and not scores.get("safety", 0):
+        return "conditions"
+
     best = max(scores, key=lambda k: (scores[k], k == "safety"))
     return best if scores[best] > 0 else "other"
 
@@ -304,7 +365,7 @@ def split_heuristic(question: str) -> Decomposition:
             # A fragment shorter than this is a stray conjunction tail, not a
             # question — splitting "wind and waves" into "wind" and "waves"
             # would produce two intents where the user asked one thing.
-            if len(cleaned) >= 12:
+            if len(cleaned) >= 8:
                 clauses.append(cleaned)
 
     if not clauses:
@@ -337,14 +398,22 @@ async def decompose(question: str) -> Decomposition:
 
     fallback = split_heuristic(question)
 
-    # A short question with no conjunction is not worth a model call.
-    if len(question) < 40 and not fallback.is_compound:
+    # A recognised single question is already unambiguous. Asking a model to
+    # split it can invent a second intent (for example treating "favourable SST"
+    # as a request to diagnose declining productivity), which then runs unrelated
+    # tools and contaminates the answer.
+    if (
+        not fallback.is_compound
+        and fallback.parts
+        and fallback.parts[0].intent != "other"
+    ):
         return fallback
 
     system = (
         "Split a marine question into its separate answerable parts.\n\n"
         'Return ONLY JSON: {"parts": [{"text": "...", "intent": "..."}]}\n\n'
-        "intent must be exactly one of: safety, forecast, fishing, routing, boundary, "
+        "intent must be exactly one of: safety, future_safety, conditions, alerts, "
+        "forecast, fishing, restricted_zones, productivity, routing, boundary, "
         "provenance, thresholds, overpass, traffic, fishing_activity, cross_validation, "
         "location, other.\n\n"
         "Rules:\n"

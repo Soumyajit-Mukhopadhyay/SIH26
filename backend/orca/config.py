@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     redis_url: SecretStr | None = None
 
     # --------------------------------------------------------- LLM providers
+    groq_api_key_primary: SecretStr | None = None
     groq_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
     openrouter_api_key: SecretStr | None = None
@@ -91,6 +92,7 @@ class Settings(BaseSettings):
     mosdac_password: SecretStr | None = None
     imd_api_key: SecretStr | None = None
     data_gov_in_api_key: SecretStr | None = None
+    worldtides_api_key: SecretStr | None = None
 
     # --------------------------------------------------------------- vessels
     aisstream_api_key: SecretStr | None = None
@@ -130,6 +132,7 @@ class Settings(BaseSettings):
     @field_validator(
         "database_url",
         "redis_url",
+        "groq_api_key_primary",
         "groq_api_key",
         "google_api_key",
         "openrouter_api_key",
@@ -143,6 +146,7 @@ class Settings(BaseSettings):
         "mosdac_password",
         "imd_api_key",
         "data_gov_in_api_key",
+        "worldtides_api_key",
         "aisstream_api_key",
         "gfw_api_token",
         "cesium_ion_token",
@@ -216,7 +220,7 @@ class Settings(BaseSettings):
 
     @property
     def has_groq(self) -> bool:
-        return self.groq_api_key is not None
+        return self.groq_api_key_primary is not None or self.groq_api_key is not None
 
     @property
     def has_gemini(self) -> bool:
@@ -253,6 +257,10 @@ class Settings(BaseSettings):
     @property
     def has_imd(self) -> bool:
         return self.imd_api_key is not None
+
+    @property
+    def has_worldtides(self) -> bool:
+        return self.worldtides_api_key is not None
 
     @property
     def has_ais(self) -> bool:

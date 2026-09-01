@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from orca.agents.graph import _numbers, _quotes_figure, critic
+from orca.agents.graph import _clean_inline_citations, _numbers, _quotes_figure, critic
 
 
 def _risk(
@@ -72,6 +72,9 @@ class TestFigureMatching:
     def test_a_veto_with_no_figure_is_not_held_against_the_draft(self):
         assert _quotes_figure("anything", "conditions unsuitable")
 
+    def test_invalid_model_citations_are_removed_and_valid_styles_normalised(self):
+        assert _clean_inline_citations("Valid 【1】, invented [3].", 2) == "Valid [1], invented ."
+
 
 class TestCriticRejects:
     async def test_it_rejects_a_draft_that_softens_a_no_go(self):
@@ -102,6 +105,27 @@ class TestCriticRejects:
         result = await critic(state)
         assert result["critic_verdict"] == "revise"
         assert "every tool failed" in result["critic_reason"]
+
+    async def test_it_rejects_exposed_internal_reasoning(self):
+        state = _state("We need to answer this from the tool results.", risk=None)
+        result = await critic(state)
+        assert result["critic_verdict"] == "revise"
+        assert "internal reasoning" in result["critic_reason"]
+
+    async def test_it_requires_the_stale_pfz_warning(self):
+        state = _state("Try the PFZ at 11 N, 80 E.", risk=None)
+        state["tool_results"] = [
+            {
+                "tool": "find_fishing_zones",
+                "ok": True,
+                "summary": "one zone",
+                "error": None,
+                "data": {"stale": True},
+            }
+        ]
+        result = await critic(state)
+        assert result["critic_verdict"] == "revise"
+        assert "field is stale" in result["critic_reason"]
 
 
 class TestCriticApproves:

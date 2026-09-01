@@ -20,6 +20,7 @@ backend/data/orca.db-*
 backend/data/rasters/
 backend/data/cache/
 backend/data/checkpoints/
+backend/data/*.log
 *.nc
 *.tif
 *.zarr/
@@ -35,6 +36,7 @@ frontend/test-results/
 Thumbs.db
 desktop.ini
 .DS_Store
+~$*.docx
 .idea/
 .vscode/*
 !.vscode/settings.json

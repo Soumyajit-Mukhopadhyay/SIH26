@@ -300,7 +300,7 @@ class Monitor:
                         + (f" at {entry.label}" if entry.label else "")
                     ),
                     detail=(
-                        f"The rule engine moved from {previous_verdict} ({previous_index:.1f}/100) "
+                        f"The safety assessment moved from {previous_verdict} ({previous_index:.1f}/100) "
                         f"to {verdict} ({index:.1f}/100) for a {risk.boat_class_label}. {reason}"
                     ),
                     before={"verdict": previous_verdict, "index": previous_index},

@@ -120,8 +120,7 @@ class RiskResult(BaseModel):
     #: what a fisherman actually wants and what nobody else's demo answers.
     what_would_change_it: list[str] = Field(default_factory=list)
     disclaimer: str = (
-        "ORCA supplements, never replaces, official IMD and INCOIS bulletins. "
-        "This verdict is computed by a deterministic rule engine, not by a language model."
+        "ORCA supplements, never replaces, official IMD and INCOIS bulletins."
     )
 
     @property
@@ -249,12 +248,11 @@ def assess(
             f"{_num(boat.min_visibility_km)} km minimum for safe navigation in this class"
         )
     if lightning_pct is not None and lightning_pct >= LIGHTNING_VETO_PCT:
-        source = "CAPE-derived" if cape_j_kg is not None and lightning_pct is not None else ""
         # One decimal, matching how the value is measured: rounding 72.7 to 73
         # here made the critic's figure check disagree with a correct draft.
         vetoes.append(
-            f"high lightning probability ({_num(round(lightning_pct, 1))}%"
-            f"{' ' + source if source else ''})"
+            f"high CAPE-derived convective-risk proxy ({_num(round(lightning_pct, 1))}%; "
+            "this is not lightning detection or an official alert)"
         )
 
     components = [
@@ -403,9 +401,10 @@ def _what_would_change_it(
         )
         if weakest is not None:
             needed = GO_THRESHOLD - index
+            label = "convective potential" if weakest.name == "lightning" else weakest.name
             out.append(
                 f"the index would need to rise {needed:.0f} points to reach GO; "
-                f"{weakest.name} is the weakest component at {weakest.score:.0f}/100"
+                f"{label} is the weakest component at {weakest.score:.0f}/100"
             )
     if verdict == "UNVERIFIABLE":
         out.append("the missing forecast inputs would need to become available")

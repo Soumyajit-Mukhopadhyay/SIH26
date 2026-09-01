@@ -226,10 +226,13 @@ async def planner(state: OrcaState) -> OrcaState:
     except LlmUnavailable as exc:
         log.warning("planner had no LLM, using the safety-first fallback: %s", exc)
 
-    # Every tool the decomposition needs must be in the plan. The planner may add
-    # to this but not drop from it: a sub-question whose tool never runs is a
-    # question the user asked and ORCA silently ignored.
+    # The closed intent map is the scope boundary. The planner may explain and
+    # order that set, but it may not expand a tide question into an unsolicited
+    # safety verdict or answer tomorrow with both current and future verdicts.
+    # Those extras are expensive and, more importantly, confuse the time basis.
     if required:
+        required_set = set(required)
+        plan = [step for step in plan if step["tool"] in required_set]
         present = {step["tool"] for step in plan}
         for tool in required:
             if tool not in present:
@@ -259,13 +262,13 @@ async def planner(state: OrcaState) -> OrcaState:
             {
                 "id": 2,
                 "tool": "assess_risk",
-                "why": "the deterministic rule engine owns the GO/NO-GO",
+                "why": "the verified safety service supplies the GO/NO-GO result",
                 "status": "pending",
             },
         ]
         rationale = rationale or (
             "No planner model was available, so ORCA fell back to its fixed safety-first "
-            "plan: fetch live conditions, then compute the deterministic verdict."
+            "plan: fetch live conditions, then compute the verified safety result."
         )
 
     return {
@@ -352,11 +355,19 @@ async def visualisation(state: OrcaState) -> OrcaState:
     """
     tools_run = {r["tool"] for r in state.get("tool_results", [])}
     layers: list[str] = []
-    if "fetch_marine_conditions" in tools_run or "fetch_forecast_window" in tools_run:
+    if (
+        "fetch_marine_conditions" in tools_run
+        or "fetch_forecast_window" in tools_run
+        or "assess_forecast_risk" in tools_run
+    ):
         layers += ["wave_height", "wind"]
     if "fetch_satellite_sst" in tools_run:
         layers.append("sst")
-    if "assess_risk" in tools_run:
+    if "find_fishing_zones" in tools_run or "screen_fishing_zones" in tools_run:
+        layers += ["pfz_rank", "chlorophyll", "sst"]
+    if "check_geofences" in tools_run or "screen_fishing_zones" in tools_run:
+        layers.append("eez")
+    if "assess_risk" in tools_run or "assess_forecast_risk" in tools_run:
         layers.append("verdict_marker")
 
     lat = state.get("lat", 0.0)
@@ -366,7 +377,11 @@ async def visualisation(state: OrcaState) -> OrcaState:
         "camera": {"lat": lat, "lon": lon, "zoom": 7},
         "bbox": [lon - span, lat - span, lon + span, lat + span],
         "layers": layers,
-        "charts": (["wave_forecast_48h"] if "fetch_forecast_window" in tools_run else []),
+        "charts": (
+            ["wave_forecast_48h"]
+            if "fetch_forecast_window" in tools_run or "assess_forecast_risk" in tools_run
+            else []
+        ),
         "card": ((state.get("risk") or {}).get("verdict", "").lower().replace("-", "") or None),
     }
     return {"ui_spec": spec, "events": [_event("ui_spec", spec=spec)]}
@@ -376,6 +391,8 @@ async def reporting(state: OrcaState) -> OrcaState:
     """Draft the answer. The LLM writes prose; it does not decide anything."""
     risk = state.get("risk")
     evidence = state.get("evidence", [])
+    references = _collect_references(evidence)
+    parts = (state.get("decomposition") or {}).get("parts") or []
 
     messages = [
         {"role": "system", "content": prompts.REPORTING_SYSTEM},
@@ -388,22 +405,30 @@ async def reporting(state: OrcaState) -> OrcaState:
                 place=state.get("place"),
                 loa_m=state.get("loa_m", 8.2),
                 revision_note=state.get("critic_reason") if state.get("critic_rounds") else None,
+                sub_questions=[str(part.get("text", "")) for part in parts if part.get("text")],
+                references=references,
             ),
         },
     ]
 
-    try:
-        # 800 truncated a compound answer mid-figure ("about 428" for 428 km²),
-        # and a cut-off number is the one output this system must never produce.
-        # The style rules bound the length; this only bounds the failure mode.
-        reply = await complete(messages, temperature=0.25, max_tokens=1200)
-        draft = reply.text.strip()
-        provider = reply.provider
-    except LlmUnavailable:
-        # Degrade to a deterministic rendering rather than failing. Less fluent,
-        # equally correct, and it still cites everything.
-        draft = _deterministic_answer(risk, state.get("tool_results", []))
-        provider = "deterministic-fallback"
+    results = state.get("tool_results", [])
+    structured = _structured_report(results)
+    if structured is not None:
+        draft = structured
+        provider = "structured-report"
+    else:
+        try:
+            # 800 truncated a compound answer mid-figure ("about 428" for 428 km²),
+            # and a cut-off number is the one output this system must never produce.
+            # The style rules bound the length; this only bounds the failure mode.
+            reply = await complete(messages, temperature=0.25, max_tokens=1200)
+            draft = reply.text.strip()
+            provider = reply.provider
+        except LlmUnavailable:
+            # Degrade to a structured rendering rather than failing. Less fluent,
+            # equally correct, and it still cites everything.
+            draft = _deterministic_answer(risk, results)
+            provider = "deterministic-fallback"
 
     return {
         "draft": draft,
@@ -429,13 +454,100 @@ def _deterministic_answer(risk: dict[str, Any] | None, results: list[dict[str, A
         for change in risk.get("what_would_change_it", [])[:2]:
             lines.append(f"- What would change it: {change}")
     for result in results:
-        if result["ok"]:
-            lines.append(f"- {result['tool']}: {result['summary']}")
-    lines.append(
-        "\nThis answer was assembled without a language model because no provider was "
-        "reachable. The verdict is unaffected — it always comes from the rule engine."
-    )
+        label = result["tool"] if result["ok"] else f"{result['tool']} (data gap)"
+        lines.append(f"- {label}: {result['summary']}")
+    lines.append("\n**In short:** " + _plain_summary(risk, results))
     return "\n".join(lines)
+
+
+def _structured_report(results: list[dict[str, Any]]) -> str | None:
+    """Human prose for result shapes where a model can only make the answer less safe."""
+    by_tool = {item.get("tool"): item for item in results}
+    route = by_tool.get("plan_route")
+    if route and "destination" in str(route.get("error", "")).lower():
+        return (
+            "**I cannot calculate a safe route until you give me a destination.**\n\n"
+            "Send the destination port, fishing ground, or latitude/longitude. No route or "
+            "route-safety conclusion has been made yet.\n\n"
+            "**In short:** Tell me where you want to go, and I will screen the path against "
+            "weather, sea state and geofencing limits."
+        )
+
+    screened = by_tool.get("screen_fishing_zones")
+    if screened:
+        data = screened.get("data") or {}
+        zones = list(data.get("screened_zones") or [])
+        if not zones:
+            return None
+        lines = ["**Screened fishing zones**"]
+        for zone in zones:
+            centre = zone.get("centroid") or {}
+            reasons = list(zone.get("reasons") or [])
+            reason_text = "; ".join(str(reason) for reason in reasons[:3]) or "no flag recorded"
+            lines.append(
+                f"- **{zone.get('action', 'REVIEW')}** — rank {zone.get('rank', '?')} PFZ at "
+                f"{float(centre.get('lat', 0)):.3f}°N, {float(centre.get('lon', 0)):.3f}°E: "
+                f"{reason_text}."
+            )
+        if all(zone.get("inside_india_eez") is True for zone in zones):
+            lines.append(
+                "\nThe geofence check kept every screened centroid inside India’s EEZ and "
+                "triggered no jurisdictional restriction. The AVOID labels above come from "
+                "the marine-condition screening, not an EEZ crossing."
+            )
+        lines.append(
+            "\n**In short:** Do not treat these PFZ candidates as cleared right now. The "
+            "convective value is a CAPE-derived proxy—not an official lightning alert—and the "
+            "PFZ field is stale, so confirm the latest IMD and INCOIS advisories before acting."
+        )
+        return "\n".join(lines)
+    return None
+
+
+def _plain_summary(risk: dict[str, Any] | None, results: list[dict[str, Any]]) -> str:
+    """A useful human conclusion even when every language provider is offline."""
+    by_tool = {item.get("tool"): item for item in results}
+    if risk:
+        return (
+            f"Treat this as {risk['verdict']} for the stated vessel and time window. "
+            "Confirm the latest IMD/INCOIS bulletin before departure."
+        )
+    if (route := by_tool.get("plan_route")) and "destination" in str(
+        route.get("error", "")
+    ).lower():
+        return "Tell me the destination coordinates or port name, and I can calculate the route."
+    if (alerts := by_tool.get("check_marine_alerts")) and not alerts.get("ok"):
+        return (
+            "ORCA cannot verify whether a lightning or cyclone warning exists here. "
+            "Check the latest official IMD warning before acting."
+        )
+    if by_tool.get("diagnose_productivity"):
+        return (
+            "A cause cannot be identified from one snapshot. Provide the region, species, "
+            "comparison period, landings, effort and environmental history."
+        )
+    if screened := by_tool.get("screen_fishing_zones"):
+        zones = list((screened.get("data") or {}).get("screened_zones") or [])
+        avoided = sum(item.get("action") == "AVOID" for item in zones)
+        if avoided:
+            return (
+                f"Do not treat these PFZs as cleared: {avoided} screened zone(s) are marked "
+                "AVOID, and stale PFZ data must be checked against the latest advisory."
+            )
+    if (tides := by_tool.get("fetch_tides")) and not tides.get("ok"):
+        return (
+            "Weather and sea values are available, but tide is not verified here. "
+            "Check an official tide source before planning around tide timing."
+        )
+    if by_tool.get("find_fishing_zones"):
+        return (
+            "These are potential fishing signals, not a safety clearance or proof of catch; "
+            "check the field date and latest INCOIS advisory."
+        )
+    return (
+        "This is the most the connected evidence supports right now. Confirm safety-critical "
+        "decisions with the latest official IMD/INCOIS bulletin."
+    )
 
 
 async def critic(state: OrcaState) -> OrcaState:
@@ -454,9 +566,9 @@ async def critic(state: OrcaState) -> OrcaState:
 
     if risk:
         verdict = risk["verdict"]
-        if verdict not in draft.upper():
+        if verdict not in _normalise_dashes(draft).upper():
             problems.append(
-                f"the rule engine returned {verdict} but the draft does not state it explicitly"
+                f"the verified safety result is {verdict} but the draft does not state it explicitly"
             )
         if verdict == "NO-GO":
             softeners = [
@@ -486,12 +598,62 @@ async def critic(state: OrcaState) -> OrcaState:
                 problems.append(f"the draft omits the veto figure {figure} from: {veto}")
                 break
 
-    if not any(r["ok"] for r in state.get("tool_results", [])) and "could not" not in draft.lower():
-        problems.append("every tool failed but the draft does not say so")
+    if not any(r["ok"] for r in state.get("tool_results", [])):
+        disclosed = any(
+            phrase in draft.lower()
+            for phrase in ("could not", "cannot", "unavailable", "not available", "unable to")
+        )
+        if not disclosed:
+            problems.append("every tool failed but the draft does not say so")
 
+    results = state.get("tool_results", [])
+    by_tool = {item.get("tool"): item for item in results}
+    lower = draft.lower()
+    meta_markers = (
+        "we need to answer",
+        "we have tool results",
+        "let's craft",
+        "the instructions",
+        "references list",
+    )
+    if any(marker in lower for marker in meta_markers) or len(draft) > 3500:
+        problems.append("the draft exposes internal reasoning instead of giving the user an answer")
+    pfz = by_tool.get("find_fishing_zones") or by_tool.get("screen_fishing_zones")
+    pfz_data = (pfz or {}).get("data") or {}
+    pfz_is_stale = bool(pfz_data.get("stale") or pfz_data.get("pfz_stale"))
+    if pfz_is_stale and "stale" not in lower:
+        problems.append("the draft recommends a PFZ without disclosing that the field is stale")
+    unsupported_sst_claims = (
+        "comfortable",
+        "is favourable",
+        "is favorable",
+        "favourable for",
+        "favorable for",
+        "ideal for",
+        "preferred by",
+    )
+    if by_tool.get("fetch_satellite_sst") and any(
+        phrase in lower for phrase in unsupported_sst_claims
+    ):
+        problems.append("the draft calls SST favourable without a species-specific supported range")
+    route = by_tool.get("plan_route")
+    if route and "destination" in str(route.get("error", "")).lower():
+        unsafe_permission = ("you can head out", "safe to sail", "safe to go", "route is safe")
+        if any(phrase in lower for phrase in unsafe_permission):
+            problems.append("the draft implies safety even though no destination was supplied")
+    if by_tool.get("fetch_tides") and "imd tide" in lower:
+        problems.append("the draft attributes tide tables to IMD without supporting evidence")
+    screened = by_tool.get("screen_fishing_zones")
+    if screened:
+        zones = list((screened.get("data") or {}).get("screened_zones") or [])
+        avoid_count = sum(zone.get("action") == "AVOID" for zone in zones)
+        if draft.upper().count("AVOID") < avoid_count:
+            problems.append("the draft omits one or more screened AVOID zones")
+        if not any(word in lower for word in ("geofence", "eez", "boundary", "jurisdiction")):
+            problems.append("the draft does not report the geofence-screening result")
     approved = not problems or rounds >= MAX_CRITIC_ROUNDS
     verdict_label = "approve" if not problems else ("escalate" if approved else "revise")
-    reason = "; ".join(problems) if problems else "draft is consistent with the rule engine"
+    reason = "; ".join(problems) if problems else "draft matches the verified evidence"
 
     events = [
         _event(
@@ -513,17 +675,22 @@ async def critic(state: OrcaState) -> OrcaState:
 
     answer = draft
     if problems and approved:
-        # Out of rounds with problems outstanding. Do not ship a draft that
-        # contradicts the engine — prepend the engine's own words.
-        answer = _engine_preamble(risk) + "\n\n" + draft
+        # Out of rounds with problems outstanding. Do not ship unsupported or
+        # leaked chain-of-thought prose; render the structured results directly.
+        answer = _deterministic_answer(risk, results)
         events.append(
             _event(
                 "step",
                 node="critic",
                 status="escalated",
-                detail="critic could not get a clean draft; the engine's verdict was prepended",
+                detail="critic could not get a clean draft; the verified verdict was prepended",
             )
         )
+
+    answer = _ensure_human_summary(answer, risk, results)
+    references = _collect_references(state.get("evidence", []))
+    answer = _clean_inline_citations(answer, len(references))
+    answer = _append_sources(answer, references)
 
     return {
         "answer": answer,
@@ -538,6 +705,20 @@ async def critic(state: OrcaState) -> OrcaState:
 #: a veto states. 2% absorbs rounding (72.7 vs 73) without accepting a genuinely
 #: different number.
 _FIGURE_TOLERANCE = 0.02
+
+
+def _normalise_dashes(text: str) -> str:
+    return text.translate(str.maketrans({char: "-" for char in "‐‑‒–—−"}))
+
+
+def _clean_inline_citations(answer: str, reference_count: int) -> str:
+    """Normalise valid citation marks and remove model-invented reference numbers."""
+
+    def replace(match: re.Match[str]) -> str:
+        number = int(match.group(1) or match.group(2))
+        return f"[{number}]" if 1 <= number <= reference_count else ""
+
+    return re.sub(r"(?:\[(\d+)\]|【(\d+)(?:†L\d+(?:-L?\d+)?)?】)", replace, answer)
 
 
 def _numbers(text: str) -> list[float]:
@@ -575,9 +756,90 @@ def _quotes_figure(draft: str, veto: str) -> bool:
 def _engine_preamble(risk: dict[str, Any] | None) -> str:
     if not risk:
         return ""
-    lines = [f"**{risk['verdict']}** (deterministic rule engine, index {risk['index']}/100)."]
+    lines = [f"**{risk['verdict']}** — verified safety index {risk['index']}/100."]
     lines += [f"- {v}" for v in risk.get("vetoes", [])]
     return "\n".join(lines)
+
+
+def _collect_references(evidence: list[Evidence]) -> list[dict[str, Any]]:
+    """Numbered, deduplicated references for both the model and the final event."""
+    references: list[dict[str, Any]] = []
+    positions: dict[tuple[str, str | None, str | None], int] = {}
+    for item in evidence:
+        candidates = [
+            {
+                "label": citation.label,
+                "provider": str(citation.provider),
+                "url": citation.url,
+                "identifier": citation.identifier,
+            }
+            for citation in item.citations
+        ]
+        if not candidates and item.url:
+            candidates = [
+                {
+                    "label": f"{item.provider} — {item.dataset_id}",
+                    "provider": str(item.provider),
+                    "url": item.url,
+                    "identifier": item.dataset_id,
+                }
+            ]
+        for candidate in candidates:
+            key = (candidate["label"], candidate.get("url"), candidate.get("identifier"))
+            support = f"{item.variable} from {item.dataset_id}"
+            if key in positions:
+                existing = references[positions[key]]
+                if support not in existing["supports"]:
+                    existing["supports"].append(support)
+                continue
+            positions[key] = len(references)
+            references.append(
+                {"number": len(references) + 1, **candidate, "supports": [support]}
+            )
+            if len(references) >= 8:
+                return references
+    return references
+
+
+def _append_sources(answer: str, references: list[dict[str, Any]]) -> str:
+    if not references or "**Sources:**" in answer:
+        return answer
+    lines = ["**Sources:**"]
+    for reference in references:
+        number = reference["number"]
+        label = str(reference["label"])
+        url = reference.get("url")
+        identifier = reference.get("identifier")
+        suffix = f" · {identifier}" if identifier and identifier not in label else ""
+        if url:
+            lines.append(f"- [{number}] [{label}]({url}){suffix}")
+        else:
+            lines.append(f"- [{number}] {label}{suffix}")
+    return answer.rstrip() + "\n\n" + "\n".join(lines)
+
+
+def _ensure_human_summary(
+    answer: str, risk: dict[str, Any] | None, results: list[dict[str, Any]]
+) -> str:
+    if "in short:" in answer.lower():
+        return answer
+    route_missing = any(
+        item.get("tool") == "plan_route" and "destination" in str(item.get("error", "")).lower()
+        for item in results
+    )
+    if route_missing:
+        summary = "Tell me the destination coordinates or port name, and I can calculate the route."
+    elif risk:
+        summary = (
+            f"Treat this as {risk['verdict']} for the stated vessel and time window, and confirm "
+            "against the latest official coastal bulletin before departure."
+        )
+    else:
+        summary = (
+            "This is the most the connected evidence can support right now; where data is missing, "
+            "ORCA is asking for it instead of guessing."
+        )
+    return answer.rstrip() + f"\n\n**In short:** {summary}"
 
 
 def route_after_critic(state: OrcaState) -> Literal["reporting", "__end__"]:
@@ -671,6 +933,7 @@ async def run(
         seen = len(events)
 
     evidence = final.get("evidence", [])
+    references = _collect_references(evidence)
     yield _event(
         "final",
         answer=final.get("answer") or final.get("draft", ""),
@@ -679,6 +942,7 @@ async def run(
         ui_spec=final.get("ui_spec"),
         plan=final.get("plan", []),
         evidence=[e.model_dump(mode="json") for e in evidence],
+        citations=references,
         evidence_summary=evidence_summary(evidence),
         critic={
             "verdict": final.get("critic_verdict"),

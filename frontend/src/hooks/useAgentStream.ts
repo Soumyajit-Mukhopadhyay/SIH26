@@ -39,6 +39,7 @@ export interface AgentFinal {
   } | null;
   plan: PlanStep[];
   evidence: import('@/lib/types').Evidence[];
+  citations: import('@/lib/types').Citation[];
   evidence_summary: import('@/lib/types').EvidenceSummary;
   critic: { verdict: string | null; reason: string | null; rounds: number };
   llm_provider: string | null;

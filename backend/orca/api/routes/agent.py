@@ -104,7 +104,7 @@ async def agent_stream(request: AgentRequest) -> StreamingResponse:
                         "at": utcnow().isoformat(),
                         "message": f"{type(exc).__name__}: {exc}",
                         "detail": (
-                            "The agent run failed. The deterministic endpoints "
+                            "The agent run failed. The safety and forecast endpoints "
                             "(/risk/assess, /forecast/point) are unaffected."
                         ),
                     }

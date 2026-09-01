@@ -343,8 +343,8 @@ export function ChatPanel({
           <div className="space-y-3">
             <p className="text-ink-2 text-xs leading-relaxed">
               Ask in plain language. ORCA will publish a plan, choose its own tools from a
-              capability catalogue, compute any safety verdict with the deterministic rule engine,
-              and show you the whole trace as it happens.
+              capability catalogue, calculate a verified safety verdict, and show you the whole
+              trace as it happens.
             </p>
             {!disabled && (
               <div className="space-y-1">
@@ -436,8 +436,8 @@ export function ChatPanel({
                 <Gavel className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
                 <span>
                   The critic rejected {run.final.critic.rounds - 1} earlier draft
-                  {run.final.critic.rounds - 1 === 1 ? '' : 's'} for disagreeing with the rule
-                  engine. This is the version that passed.
+                  {run.final.critic.rounds - 1 === 1 ? '' : 's'} because its claims did not match
+                  the verified evidence. This is the version that passed.
                 </span>
               </p>
             )}
@@ -459,8 +459,8 @@ export function ChatPanel({
             <div className="label text-red mb-1">Agent run failed</div>
             <p className="text-ink-1 text-2xs leading-snug">{run.error}</p>
             <p className="text-ink-2 mt-1 text-2xs leading-snug">
-              The deterministic verdict on the right is unaffected — it does not go through the
-              agent plane.
+              The safety card on the right remains available because it is calculated separately
+              from the conversational answer.
             </p>
           </div>
         )}
