@@ -89,11 +89,12 @@ export function SarPanel({
       <button
         type="button"
         onClick={() => onToggle(true)}
-        className="glass pointer-events-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-white/5"
+        className="glass pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg p-0 transition-colors hover:bg-white/5"
         title="Search and rescue drift"
+        aria-label="Search and rescue drift"
       >
         <LifeBuoy className="text-red h-3.5 w-3.5" aria-hidden />
-        <span className="label">SAR</span>
+        <span className="sr-only">SAR</span>
       </button>
     );
   }

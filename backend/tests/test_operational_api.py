@@ -18,6 +18,7 @@ def test_operational_endpoints_are_in_openapi() -> None:
             "/catalog/nasa",
             "/catalog/sentinel",
             "/imagery/sentinel/preview",
+            "/imagery/nasa/preview",
             "/catalog/cmems",
             "/traffic/ais",
             "/traffic/fishing-effort",

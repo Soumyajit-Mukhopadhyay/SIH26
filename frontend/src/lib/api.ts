@@ -138,8 +138,16 @@ export const api = {
   sentinelCatalogue: (lat: number, lon: number, days = 7) =>
     request<SentinelCatalogueSearch>(`/catalog/sentinel?${q({ lat, lon, days })}`),
 
-  sentinelPreviewUrl: (lat: number, lon: number, days = 7, size = 384) =>
-    `/api/imagery/sentinel/preview?${q({ lat, lon, days, size })}`,
+  sentinelPreviewUrl: (
+    lat: number,
+    lon: number,
+    collection: 'sentinel-3-olci' | 'sentinel-2-l2a' = 'sentinel-3-olci',
+    days = 7,
+    size = 384,
+  ) => `/api/imagery/sentinel/preview?${q({ lat, lon, collection, days, size })}`,
+
+  nasaGibsPreviewUrl: (lat: number, lon: number, days = 3, size = 384) =>
+    `/api/imagery/nasa/preview?${q({ lat, lon, days, size })}`,
 
   forecastPoint: (lat: number, lon: number, includeSatelliteSst = true) =>
     request<PointForecast>(
@@ -166,7 +174,10 @@ export const api = {
         lon,
         heading_deg: headingDeg,
         speed_kn: speedKn,
-        radius_km: 150,
+        // The India EEZ is an area, so a point near the middle can be more than
+        // 150 km from either polygon edge. Use the backend's supported maximum
+        // to expose the current inside/outside state in the verdict UI.
+        radius_km: 600,
         previous,
       }),
     }),

@@ -20,7 +20,21 @@ import {
   ScatterplotLayer,
 } from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
-import { Anchor, Crosshair, Loader2, MapPin, Ruler, Waves } from 'lucide-react';
+import {
+  Anchor,
+  BellRing,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  Crosshair,
+  LifeBuoy,
+  Loader2,
+  MapPin,
+  Palette,
+  Ruler,
+  Satellite,
+  Waves,
+} from 'lucide-react';
 import { clsx } from 'clsx';
 import { api, ApiError } from '@/lib/api';
 import type {
@@ -39,7 +53,13 @@ import type {
   RoutePlan,
   ThresholdTable,
 } from '@/lib/types';
-import { AOI, HOME_VIEW, OceanMap, type OceanMapHandle } from '@/components/OceanMap';
+import {
+  AOI,
+  HOME_VIEW,
+  OceanMap,
+  type MapSurface,
+  type OceanMapHandle,
+} from '@/components/OceanMap';
 import { FreshnessStrip } from '@/components/FreshnessStrip';
 import { VerdictCard } from '@/components/VerdictCard';
 import { EvidencePanel } from '@/components/EvidencePanel';
@@ -98,6 +118,9 @@ export default function App() {
   const [risk, setRisk] = useState<RiskResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [verdictPanelOpen, setVerdictPanelOpen] = useState(true);
+  const [evidencePanelOpen, setEvidencePanelOpen] = useState(true);
+  const [chatOpen, setChatOpen] = useState(true);
 
   const [loaM, setLoaM] = useState(8.2);
 
@@ -129,6 +152,7 @@ export default function App() {
   // while the rail is closed still has to be counted.
   const alerts = useAlerts();
   const [alertRailOpen, setAlertRailOpen] = useState(false);
+  const [intelOpen, setIntelOpen] = useState(false);
   const [watchId, setWatchId] = useState<string | null>(null);
 
   // Keep the watch pointed at the vessel and position the console is showing.
@@ -304,6 +328,32 @@ export default function App() {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [loaM, heading, speed],
+  );
+
+  const rejectLandPoint = useCallback(
+    (lon: number, lat: number, surface: MapSurface, purpose: 'analysis' | 'destination') => {
+      if (surface !== 'land') return false;
+      if (purpose === 'analysis') {
+        setSelection(null);
+        setForecast(null);
+        setRisk(null);
+        setGeofence(null);
+        setSeaViewOpen(false);
+      } else {
+        setPickingDestination(false);
+        setRouteDestination(null);
+        setRoutePlan(null);
+      }
+      setLoading(false);
+      setError(
+        `${lat.toFixed(3)}°N ${lon.toFixed(3)}°E is on land. ` +
+          (purpose === 'destination'
+            ? 'A marine route destination must be placed on water.'
+            : 'ORCA did not run a sea forecast or EEZ warning; choose a point on the water.'),
+      );
+      return true;
+    },
+    [],
   );
 
   // Re-run when the vessel changes: the same sea is a different verdict for a
@@ -830,16 +880,19 @@ export default function App() {
           <OceanMap
             ref={mapRef}
             layers={layers}
-            onClick={(lon, lat) => {
+            onClick={(lon, lat, surface) => {
             // While picking a destination the click sets the endpoint and does
             // NOT move the selection: re-running the point forecast would throw
             // away the origin the user is planning from.
             if (pickingDestination) {
+              if (rejectLandPoint(lon, lat, surface, 'destination')) return;
+              setError(null);
               setRouteDestination({ lat, lon });
               setPickingDestination(false);
               setRoutePlan(null);
               return;
             }
+            if (rejectLandPoint(lon, lat, surface, 'analysis')) return;
             void query(lon, lat);
           }}
             className="absolute inset-0"
@@ -954,7 +1007,12 @@ export default function App() {
         </div>
 
         {/* ---------------- centre-left: chat + live trace ---------------- */}
-        <div className="glass pointer-events-auto absolute top-3 bottom-3 left-[17.5rem] z-20 flex w-[23rem] flex-col rounded-lg">
+        <div
+          className={clsx(
+            'glass pointer-events-auto absolute top-3 bottom-3 left-[17.5rem] z-20 w-[23rem] flex-col rounded-lg',
+            chatOpen ? 'flex' : 'hidden',
+          )}
+        >
           <ChatPanel
             run={agentRun}
             disabled={!selection}
@@ -982,8 +1040,27 @@ export default function App() {
             speak={speakReply}
             onSpeak={setSpeakReply}
             voices={voices}
+            onClose={() => setChatOpen(false)}
           />
         </div>
+
+        {!chatOpen && (
+          <button
+            type="button"
+            onClick={() => setChatOpen(true)}
+            className="glass border-cyan/40 text-cyan hover:border-cyan/70 hover:bg-cyan/10 pointer-events-auto absolute bottom-4 left-[17.5rem] z-30 flex h-12 w-12 items-center justify-center rounded-full border shadow-[0_0_28px_-8px_rgba(34,211,238,0.7)] transition-colors"
+            aria-label="Open Ask ORCA chat"
+            title="Open Ask ORCA chat"
+          >
+            <Bot className="h-5 w-5" aria-hidden />
+            {agentRun.running && (
+              <span
+                className="bg-jade absolute top-1 right-1 h-2 w-2 animate-pulse rounded-full"
+                aria-hidden
+              />
+            )}
+          </button>
+        )}
 
         {/* ------- bottom centre: passage planning, then the sea view ------- */}
         {selection && (
@@ -1016,91 +1093,179 @@ export default function App() {
           </div>
         )}
 
-        {/* ---------------- top left of the map: alerts ---------------- */}
-        <div className="pointer-events-none absolute top-3 left-[41rem] z-30 flex flex-col items-start">
-          <AlertRail
-            alerts={alerts.alerts}
-            status={alerts.status}
-            connected={alerts.connected}
-            unseen={alerts.unseen}
-            onOpen={alerts.markAllSeen}
-            onAcknowledge={(id) => void alerts.acknowledge(id)}
-            onCheckNow={alerts.checkNow}
-            canWatch={Boolean(selection)}
-            watching={Boolean(watchId)}
-            onWatchToggle={() => {
-              if (watchId) {
-                void alerts.unwatch(watchId);
-                setWatchId(null);
-                return;
-              }
-              if (!selection) return;
-              void alerts
-                .watch({
-                  lat: selection.lat,
-                  lon: selection.lon,
-                  loaM,
-                  label: selection.label,
-                })
-                .then(setWatchId)
-                .catch(() => setWatchId(null));
-            }}
-            open={alertRailOpen}
-            onToggle={setAlertRailOpen}
-          />
-        </div>
+        {/* Compact top toolbar. One panel opens downward at a time. */}
+        <div
+          className={clsx(
+            'pointer-events-none absolute top-3 z-40 flex h-10 items-start gap-2 min-[1701px]:left-1/2 min-[1701px]:-translate-x-1/2',
+            chatOpen ? 'left-[41rem]' : 'left-[17.5rem]',
+          )}
+        >
+          <div className="relative h-10 w-10 shrink-0">
+            {alertRailOpen && (
+              <button
+                type="button"
+                onClick={() => setAlertRailOpen(false)}
+                className="glass text-cyan pointer-events-auto absolute inset-0 flex items-center justify-center rounded-lg"
+                aria-label="Close alerts"
+                title="Close alerts"
+              >
+                <BellRing className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
+            <div className={clsx('absolute left-0', alertRailOpen ? 'top-12' : 'top-0')}>
+              <AlertRail
+                alerts={alerts.alerts}
+                status={alerts.status}
+                connected={alerts.connected}
+                unseen={alerts.unseen}
+                onOpen={alerts.markAllSeen}
+                onAcknowledge={(id) => void alerts.acknowledge(id)}
+                onCheckNow={alerts.checkNow}
+                canWatch={Boolean(selection)}
+                watching={Boolean(watchId)}
+                onWatchToggle={() => {
+                  if (watchId) {
+                    void alerts.unwatch(watchId);
+                    setWatchId(null);
+                    return;
+                  }
+                  if (!selection) return;
+                  void alerts
+                    .watch({
+                      lat: selection.lat,
+                      lon: selection.lon,
+                      loaM,
+                      label: selection.label,
+                    })
+                    .then(setWatchId)
+                    .catch(() => setWatchId(null));
+                }}
+                open={alertRailOpen}
+                onToggle={(open) => {
+                  setAlertRailOpen(open);
+                  if (open) {
+                    setTreatmentRailOpen(false);
+                    setIntelOpen(false);
+                    setSarOpen(false);
+                  }
+                }}
+              />
+            </div>
+          </div>
 
-        {/* ---------------- top right of the map: SAR mode ---------------- */}
-        <div className="pointer-events-none absolute top-3 right-[25.5rem] z-20 flex flex-col items-end gap-2">
-          <OperationalIntelPanel point={selection} />
-          <SarPanel
-            origin={selection}
-            hours={sarHours}
-            onHours={setSarHours}
-            objectClass={sarClass}
-            onObjectClass={setSarClass}
-            classes={sarClasses}
-            plan={sarPlan}
-            onPlan={(next) => {
-              setSarPlan(next);
-              // Frame the search area. A 2000 km² area is about a 25 km radius,
-              // which at EEZ zoom is ten pixels — computing it and then not
-              // showing it is the same as not computing it. Padded generously so
-              // the ring is not flush against the panel edges.
-              const ring = next?.areas?.[next.areas.length - 1]?.ring;
-              if (ring?.length) {
-                const lons = ring.map((p) => p[0]);
-                const lats = ring.map((p) => p[1]);
-                const pad = 0.25;
-                mapRef.current?.flyToBox(
-                  Math.min(...lons) - pad,
-                  Math.min(...lats) - pad,
-                  Math.max(...lons) + pad,
-                  Math.max(...lats) + pad,
-                );
-              }
-            }}
-            open={sarOpen}
-            onToggle={setSarOpen}
-          />
-        </div>
+          <div className="relative h-10 w-10 shrink-0">
+            {treatmentRailOpen && (
+              <button
+                type="button"
+                onClick={() => setTreatmentRailOpen(false)}
+                className="glass text-cyan pointer-events-auto absolute inset-0 flex items-center justify-center rounded-lg"
+                aria-label="Close visual treatments"
+                title="Close visual treatments"
+              >
+                <Palette className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
+            <div className={clsx('absolute left-0', treatmentRailOpen ? 'top-12' : 'top-0')}>
+              <TreatmentRail
+                active={treatment}
+                onChange={setTreatment}
+                fps={frame.fps}
+                degradedReason={frame.reason}
+                open={treatmentRailOpen}
+                onToggle={(open) => {
+                  setTreatmentRailOpen(open);
+                  if (open) {
+                    setAlertRailOpen(false);
+                    setIntelOpen(false);
+                    setSarOpen(false);
+                  }
+                }}
+              />
+            </div>
+          </div>
 
-        {/* ---------------- top centre: visual treatments ---------------- */}
-        <div className="pointer-events-none absolute top-3 left-1/2 z-20 -translate-x-1/2">
-          <TreatmentRail
-            active={treatment}
-            onChange={setTreatment}
-            fps={frame.fps}
-            degradedReason={frame.reason}
-            open={treatmentRailOpen}
-            onToggle={setTreatmentRailOpen}
-          />
+          <div className="relative h-10 w-10 shrink-0">
+            {intelOpen && (
+              <button
+                type="button"
+                onClick={() => setIntelOpen(false)}
+                className="glass text-cyan pointer-events-auto absolute inset-0 flex items-center justify-center rounded-lg"
+                aria-label="Close marine intelligence"
+                title="Close marine intelligence"
+              >
+                <Satellite className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
+            <div className={clsx('absolute left-0', intelOpen ? 'top-12' : 'top-0')}>
+              <OperationalIntelPanel
+                point={selection}
+                open={intelOpen}
+                onToggle={(open) => {
+                  setIntelOpen(open);
+                  if (open) {
+                    setAlertRailOpen(false);
+                    setTreatmentRailOpen(false);
+                    setSarOpen(false);
+                  }
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="relative h-10 w-10 shrink-0">
+            {sarOpen && (
+              <button
+                type="button"
+                onClick={() => setSarOpen(false)}
+                className="glass text-red pointer-events-auto absolute inset-0 flex items-center justify-center rounded-lg"
+                aria-label="Close search and rescue"
+                title="Close search and rescue"
+              >
+                <LifeBuoy className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
+            <div className={clsx('absolute left-0', sarOpen ? 'top-12' : 'top-0')}>
+              <SarPanel
+                origin={selection}
+                hours={sarHours}
+                onHours={setSarHours}
+                objectClass={sarClass}
+                onObjectClass={setSarClass}
+                classes={sarClasses}
+                plan={sarPlan}
+                onPlan={(next) => {
+                  setSarPlan(next);
+                  const ring = next?.areas?.[next.areas.length - 1]?.ring;
+                  if (ring?.length) {
+                    const lons = ring.map((point) => point[0]);
+                    const lats = ring.map((point) => point[1]);
+                    const pad = 0.25;
+                    mapRef.current?.flyToBox(
+                      Math.min(...lons) - pad,
+                      Math.min(...lats) - pad,
+                      Math.max(...lons) + pad,
+                      Math.max(...lats) + pad,
+                    );
+                  }
+                }}
+                open={sarOpen}
+                onToggle={(open) => {
+                  setSarOpen(open);
+                  if (open) {
+                    setAlertRailOpen(false);
+                    setTreatmentRailOpen(false);
+                    setIntelOpen(false);
+                  }
+                }}
+              />
+            </div>
+          </div>
         </div>
 
         {/* ---------------- right: verdict + evidence ---------------- */}
-        <div className="pointer-events-none absolute top-3 right-3 bottom-3 z-20 flex w-[24rem] flex-col gap-2">
+        <div className="pointer-events-none absolute top-3 right-3 bottom-3 z-20 flex flex-col items-end gap-2">
           {loading && !risk && (
-            <div className="glass pointer-events-auto flex items-center gap-2 rounded-lg px-4 py-3">
+            <div className="glass pointer-events-auto flex w-[24rem] items-center gap-2 rounded-lg px-4 py-3">
               <Loader2 className="text-cyan h-4 w-4 animate-spin" aria-hidden />
               <span className="text-ink-1 text-xs">
                 Fetching live conditions and computing the verdict…
@@ -1109,32 +1274,76 @@ export default function App() {
           )}
 
           {error && (
-            <div className="glass border-red/40 pointer-events-auto rounded-lg border px-4 py-3">
+            <div className="glass border-red/40 pointer-events-auto w-[24rem] rounded-lg border px-4 py-3">
               <div className="label text-red mb-1">Request failed</div>
               <p className="text-ink-1 text-xs leading-snug">{error}</p>
             </div>
           )}
 
-          {risk && (
-            <div className="pointer-events-auto">
-              <VerdictCard result={risk} />
-            </div>
-          )}
-
-          {forecast && (
-            <div className="glass pointer-events-auto min-h-0 flex-1 overflow-y-auto rounded-lg">
-              <div className="glass border-hairline sticky top-0 z-10 flex items-center gap-1.5 border-b px-3 py-2">
-                <Waves className="text-cyan h-3.5 w-3.5" aria-hidden />
-                <span className="label">Evidence — how ORCA knows</span>
-                {loading && <Loader2 className="text-cyan ml-auto h-3 w-3 animate-spin" aria-hidden />}
+          {risk &&
+            (verdictPanelOpen ? (
+              <div className="pointer-events-auto w-[24rem]">
+                <VerdictCard
+                  result={risk}
+                  geofence={geofence}
+                  onCollapse={() => setVerdictPanelOpen(false)}
+                />
               </div>
-              <EvidencePanel forecast={forecast} />
-            </div>
-          )}
+            ) : (
+              <button
+                type="button"
+                onClick={() => setVerdictPanelOpen(true)}
+                className={clsx(
+                  'glass pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border transition-colors hover:bg-white/5',
+                  risk.verdict === 'NO-GO'
+                    ? 'border-red/55 text-red'
+                    : risk.verdict === 'CAUTION'
+                      ? 'border-amber/50 text-amber'
+                      : risk.verdict === 'GO'
+                        ? 'border-jade/45 text-jade'
+                        : 'border-hairline-strong text-ink-1',
+                )}
+                aria-label="Expand safety verdict horizontally"
+                title={`Open ${risk.verdict} safety verdict`}
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden />
+              </button>
+            ))}
+
+          {forecast &&
+            (evidencePanelOpen ? (
+              <div className="glass pointer-events-auto min-h-0 w-[24rem] flex-1 overflow-y-auto rounded-lg">
+                <div className="glass border-hairline sticky top-0 z-10 flex items-center gap-1.5 border-b px-3 py-2">
+                  <Waves className="text-cyan h-3.5 w-3.5" aria-hidden />
+                  <span className="label flex-1">Evidence — how ORCA knows</span>
+                  {loading && <Loader2 className="text-cyan h-3 w-3 animate-spin" aria-hidden />}
+                  <button
+                    type="button"
+                    onClick={() => setEvidencePanelOpen(false)}
+                    className="text-ink-2 hover:bg-abyss-2/70 hover:text-cyan -my-1 -mr-1 rounded p-1.5 transition-colors"
+                    aria-label="Collapse evidence panel horizontally"
+                    title="Hide this card and expose more of the sea"
+                  >
+                    <ChevronRight className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
+                <EvidencePanel forecast={forecast} />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEvidencePanelOpen(true)}
+                className="glass border-cyan/35 text-cyan pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg border transition-colors hover:bg-white/5"
+                aria-label="Expand evidence panel horizontally"
+                title="Open evidence — how ORCA knows"
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden />
+              </button>
+            ))}
         </div>
 
         {/* ---------------- empty state ---------------- */}
-        {!selection && !loading && (
+        {!selection && !loading && !error && (
           <div className="pointer-events-none absolute inset-y-0 right-[25rem] left-[41.5rem] z-10 flex items-center justify-center">
             {/* `pointer-events-none`, deliberately. The card says "click anywhere
                 on the sea" and then, being `pointer-events-auto`, swallowed every

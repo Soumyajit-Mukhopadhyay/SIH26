@@ -31,6 +31,36 @@ function evaluatePixel(sample) {
 }
 """
 
+SENTINEL2_TRUE_COLOUR_EVALSCRIPT = """//VERSION=3
+function setup() {
+  return {
+    input: ["B02", "B03", "B04", "dataMask"],
+    output: { bands: 4, sampleType: "AUTO" }
+  };
+}
+function evaluatePixel(sample) {
+  return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02, sample.dataMask];
+}
+"""
+
+PREVIEW_COLLECTIONS = {
+    "sentinel-3-olci": {
+        "evalscript": TRUE_COLOUR_EVALSCRIPT,
+        "radius_deg": 0.2,
+        "resolution_m": 300,
+        "label": "Copernicus Sentinel-3 OLCI",
+        "default_platform": "Sentinel-3",
+    },
+    "sentinel-2-l2a": {
+        "evalscript": SENTINEL2_TRUE_COLOUR_EVALSCRIPT,
+        # About 9 km north-south: close to the native 10 m sampling at 768 px.
+        "radius_deg": 0.04,
+        "resolution_m": 10,
+        "label": "Copernicus Sentinel-2 L2A",
+        "default_platform": "Sentinel-2",
+    },
+}
+
 
 class SentinelItem(BaseModel):
     item_id: str
@@ -39,6 +69,7 @@ class SentinelItem(BaseModel):
     cloud_cover_percent: float | None = Field(default=None, ge=0, le=100)
     bbox: list[float] = Field(default_factory=list)
     catalogue_url: str | None = None
+    platform: str | None = None
 
 
 class SentinelSearchResponse(BaseModel):
@@ -59,6 +90,11 @@ class SentinelPreview:
     acquired_at: datetime
     bbox: tuple[float, float, float, float]
     provenance: str
+    collection: str
+    source_label: str
+    platform: str
+    resolution_m: int
+    cloud_cover_percent: float | None
 
 
 def _dt(value: Any) -> datetime | None:
@@ -161,6 +197,9 @@ class SentinelHubSource(Source):
                     cloud_cover_percent=float(cloud) if isinstance(cloud, (int, float)) else None,
                     bbox=[float(value) for value in feature.get("bbox", [])],
                     catalogue_url=str(self_link) if self_link else None,
+                    platform=(
+                        str(properties.get("platform")) if properties.get("platform") else None
+                    ),
                 )
             )
         return SentinelSearchResponse(
@@ -182,31 +221,41 @@ class SentinelHubSource(Source):
         lat: float,
         lon: float,
         *,
+        collection: str = "sentinel-3-olci",
         days: int = 7,
-        radius_deg: float = 0.2,
+        radius_deg: float | None = None,
         size: int = 384,
     ) -> SentinelPreview:
-        """Process a small true-colour PNG from the latest catalogued OLCI acquisition."""
+        """Process a true-colour PNG from a catalogued Sentinel acquisition."""
         if not -90 <= lat <= 90 or not -180 <= lon <= 180:
             raise ValueError("latitude/longitude outside WGS84 range")
         if not 1 <= days <= 90 or not 128 <= size <= 768:
             raise ValueError("days must be 1-90 and size must be 128-768 pixels")
+        config = PREVIEW_COLLECTIONS.get(collection)
+        if config is None:
+            raise ValueError(f"unsupported Sentinel preview collection: {collection}")
+        effective_radius = float(radius_deg or config["radius_deg"])
         now = utcnow()
         bbox = (
-            max(-180.0, lon - radius_deg),
-            max(-90.0, lat - radius_deg),
-            min(180.0, lon + radius_deg),
-            min(90.0, lat + radius_deg),
+            max(-180.0, lon - effective_radius),
+            max(-90.0, lat - effective_radius),
+            min(180.0, lon + effective_radius),
+            min(90.0, lat + effective_radius),
         )
-        catalogue = await self.search(
-            "sentinel-3-olci", bbox, now - timedelta(days=days), now, limit=20
-        )
+        catalogue = await self.search(collection, bbox, now - timedelta(days=days), now, limit=50)
         candidates = [item for item in catalogue.items if item.acquired_at is not None]
         if not candidates:
-            raise LookupError("no Sentinel-3 OLCI product covers this area in the requested window")
-        selected = max(
-            candidates, key=lambda item: item.acquired_at or datetime.min.replace(tzinfo=UTC)
-        )
+            raise LookupError(f"no {config['label']} product covers this area in the requested window")
+        if collection == "sentinel-2-l2a":
+            clearer = [
+                item
+                for item in candidates
+                if item.cloud_cover_percent is not None and item.cloud_cover_percent <= 40
+            ]
+            pool = clearer or candidates
+        else:
+            pool = candidates
+        selected = max(pool, key=lambda item: item.acquired_at or datetime.min.replace(tzinfo=UTC))
         assert selected.acquired_at is not None
         token = await self._access_token()
         result = await self.fetch(
@@ -221,7 +270,7 @@ class SentinelHubSource(Source):
                     },
                     "data": [
                         {
-                            "type": "sentinel-3-olci",
+                            "type": collection,
                             "dataFilter": {
                                 "timeRange": {
                                     "from": (
@@ -241,7 +290,7 @@ class SentinelHubSource(Source):
                     "height": size,
                     "responses": [{"format": {"type": "image/png"}}],
                 },
-                "evalscript": TRUE_COLOUR_EVALSCRIPT,
+                "evalscript": str(config["evalscript"]),
             },
             conditional=False,
             retries=1,
@@ -258,6 +307,11 @@ class SentinelHubSource(Source):
             acquired_at=selected.acquired_at,
             bbox=bbox,
             provenance=result.provenance.value,
+            collection=collection,
+            source_label=str(config["label"]),
+            platform=selected.platform or str(config["default_platform"]),
+            resolution_m=int(config["resolution_m"]),
+            cloud_cover_percent=selected.cloud_cover_percent,
         )
 
 

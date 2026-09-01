@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
@@ -15,6 +16,7 @@ from orca.sources.ais import AisSnapshot, aisstream
 from orca.sources.cmems import CmemsCatalogueResponse, cmems
 from orca.sources.gfw import FishingEffortResponse, gfw
 from orca.sources.nasa import NasaSearchResponse, cmr
+from orca.sources.nasa_gibs import nasa_gibs
 from orca.sources.sentinel_hub import SentinelSearchResponse, sentinel_hub
 
 router = APIRouter(tags=["operational intelligence"])
@@ -142,9 +144,14 @@ async def sentinel_preview(
     lon: float = Query(..., ge=-180, le=180),
     days: int = Query(7, ge=1, le=90),
     size: int = Query(384, ge=128, le=768),
+    collection: Literal["sentinel-3-olci", "sentinel-2-l2a"] = Query(
+        "sentinel-3-olci"
+    ),
 ) -> Response:
     try:
-        preview = await sentinel_hub.preview(lat, lon, days=days, size=size)
+        preview = await sentinel_hub.preview(
+            lat, lon, collection=collection, days=days, size=size
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RuntimeError, ValueError) as exc:
@@ -157,6 +164,50 @@ async def sentinel_preview(
             "Cache-Control": "private, max-age=900",
             "X-ORCA-Acquired-At": preview.acquired_at.isoformat(),
             "X-ORCA-Provenance": preview.provenance,
+            "X-ORCA-Source": preview.source_label,
+            "X-ORCA-Satellite": preview.platform,
+            "X-ORCA-Resolution-M": str(preview.resolution_m),
+            "X-ORCA-Collection": preview.collection,
+            "X-ORCA-Item-Id": preview.item_id,
+            **(
+                {"X-ORCA-Cloud-Cover": f"{preview.cloud_cover_percent:.1f}"}
+                if preview.cloud_cover_percent is not None
+                else {}
+            ),
+        },
+    )
+
+
+@router.get(
+    "/imagery/nasa/preview",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def nasa_imagery_preview(
+    lat: float = Query(..., ge=-90, le=90),
+    lon: float = Query(..., ge=-180, le=180),
+    days: int = Query(3, ge=1, le=7),
+    size: int = Query(384, ge=128, le=768),
+) -> Response:
+    try:
+        preview = await nasa_gibs.preview(lat, lon, days=days, size=size)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return Response(
+        content=preview.content,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, max-age=900",
+            "X-ORCA-Observation-Date": preview.observation_date.isoformat(),
+            "X-ORCA-Provenance": preview.provenance,
+            "X-ORCA-Source": "NASA GIBS corrected reflectance",
+            "X-ORCA-Satellite": preview.satellite,
+            "X-ORCA-Instrument": preview.instrument,
+            "X-ORCA-Resolution-M": str(preview.resolution_m),
+            "X-ORCA-Layer": preview.layer_id,
+            "X-ORCA-Time-Precision": "date",
         },
     )
 

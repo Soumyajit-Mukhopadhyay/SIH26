@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import xarray as xr
+from PIL import Image
 from pydantic import SecretStr
 from sgp4.api import Satrec
 
@@ -339,3 +341,114 @@ async def test_sentinel_preview_uses_catalogued_acquisition_window(monkeypatch) 
     body = captured["json_body"]
     assert isinstance(body, dict)
     assert body["input"]["data"][0]["type"] == "sentinel-3-olci"
+
+
+@pytest.mark.asyncio
+async def test_sentinel2_preview_uses_ten_metre_extent_and_low_cloud_scene(monkeypatch) -> None:
+    import orca.sources.sentinel_hub as module
+
+    source = module.SentinelHubSource()
+    older_clear = datetime(2026, 8, 25, 4, 30, tzinfo=UTC)
+    newer_cloudy = datetime(2026, 8, 30, 4, 30, tzinfo=UTC)
+
+    async def fake_search(*_args, **_kwargs):
+        return module.SentinelSearchResponse(
+            collection="sentinel-2-l2a",
+            bbox=(80.36, 13.06, 80.44, 13.14),
+            start_time=older_clear - timedelta(days=10),
+            end_time=newer_cloudy,
+            returned=2,
+            items=[
+                module.SentinelItem(
+                    item_id="S2-clear",
+                    collection="sentinel-2-l2a",
+                    acquired_at=older_clear,
+                    cloud_cover_percent=12,
+                    platform="sentinel-2b",
+                ),
+                module.SentinelItem(
+                    item_id="S2-cloudy",
+                    collection="sentinel-2-l2a",
+                    acquired_at=newer_cloudy,
+                    cloud_cover_percent=91,
+                    platform="sentinel-2a",
+                ),
+            ],
+            provenance="live",
+            note="test",
+        )
+
+    async def fake_token():
+        return "token"
+
+    captured: dict[str, object] = {}
+
+    async def fake_fetch(*_args, **kwargs):
+        captured.update(kwargs)
+        return Fetched(
+            ok=True,
+            source=source.name,
+            url=module.PROCESS_URL,
+            status=200,
+            content=b"\x89PNG\r\n\x1a\npreview",
+        )
+
+    monkeypatch.setattr(source, "search", fake_search)
+    monkeypatch.setattr(source, "_access_token", fake_token)
+    monkeypatch.setattr(source, "fetch", fake_fetch)
+    preview = await source.preview(13.1, 80.4, collection="sentinel-2-l2a", days=45)
+    assert preview.item_id == "S2-clear"
+    assert preview.resolution_m == 10
+    assert preview.cloud_cover_percent == 12
+    assert preview.platform == "sentinel-2b"
+    assert preview.bbox == pytest.approx((80.36, 13.06, 80.44, 13.14))
+    body = captured["json_body"]
+    assert isinstance(body, dict)
+    assert body["input"]["data"][0]["type"] == "sentinel-2-l2a"
+    assert 'input: ["B02", "B03", "B04", "dataMask"]' in body["evalscript"]
+
+
+def _test_png(rgb: tuple[int, int, int]) -> bytes:
+    stream = BytesIO()
+    Image.new("RGB", (4, 4), rgb).save(stream, format="PNG")
+    return stream.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_nasa_gibs_skips_empty_current_day_and_reports_date_precision(monkeypatch) -> None:
+    import orca.sources.nasa_gibs as module
+
+    source = module.NasaGibsSource()
+    responses = iter(
+        [
+            Fetched(
+                ok=True,
+                source=source.name,
+                url=module.WMS_URL,
+                status=200,
+                content=_test_png((0, 0, 0)),
+            ),
+            Fetched(
+                ok=True,
+                source=source.name,
+                url=module.WMS_URL,
+                status=200,
+                content=_test_png((70, 90, 110)),
+            ),
+        ]
+    )
+    calls: list[dict[str, object]] = []
+
+    async def fake_fetch(*_args, **kwargs):
+        calls.append(kwargs)
+        return next(responses)
+
+    monkeypatch.setattr(module, "utcnow", lambda: EPOCH)
+    monkeypatch.setattr(source, "fetch", fake_fetch)
+    preview = await source.preview(13.1, 80.4)
+    assert preview.observation_date == EPOCH.date()
+    assert preview.satellite == "NOAA-20"
+    assert preview.instrument == "VIIRS"
+    assert preview.resolution_m == 750
+    assert len(calls) == 2
+    assert calls[0]["params"]["time"] == "2024-01-01"

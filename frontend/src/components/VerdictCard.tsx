@@ -1,33 +1,26 @@
 /**
- * The verdict card. The most important surface in ORCA.
+ * The safety verdict and the current observations that produced it.
  *
- * What it has to communicate, in order of priority:
- *
- * 1. The verdict, unmissable.
- * 2. The vetoes, verbatim. "Hs 2.4 m is at or over the 1.5 m limit for your 8.2 m
- *    boat" is the most valuable string in the system: it teaches the user
- *    something true and shows that the reasoning is a computation.
- * 3. What would change it — the part a fisherman actually acts on.
- * 4. The arithmetic, on demand.
- *
- * UNVERIFIABLE is a first-class verdict here, rendered distinctly from NO-GO.
- * "We cannot check" and "it is dangerous" are different messages and collapsing
- * them would be a safety bug, not a UI simplification.
+ * This card deliberately shows only present-condition analysis. Forecast-facing
+ * suggestions belong in the agent answer, while provenance and source age live
+ * in the evidence panel beside this card.
  */
 
-import { useState } from 'react';
 import {
   AlertTriangle,
   Ban,
   CheckCircle2,
-  ChevronDown,
+  ChevronRight,
   HelpCircle,
-  Info,
-  Radio,
 } from 'lucide-react';
 import { clsx } from 'clsx';
-import type { RiskResult, Verdict } from '@/lib/types';
-import { ProvenanceBadge } from './ProvenanceBadge';
+import type {
+  GeofenceCheck,
+  Proximity,
+  RiskComponent,
+  RiskResult,
+  Verdict,
+} from '@/lib/types';
 
 const VERDICT_STYLES: Record<
   Verdict,
@@ -52,7 +45,7 @@ const VERDICT_STYLES: Record<
   },
   CAUTION: {
     label: 'CAUTION',
-    sub: 'Marginal — go only with a shortened window and a watched forecast',
+    sub: 'Current conditions are marginal for this vessel class',
     icon: AlertTriangle,
     text: 'text-amber',
     ring: 'border-amber/50',
@@ -70,7 +63,7 @@ const VERDICT_STYLES: Record<
   },
   UNVERIFIABLE: {
     label: 'UNVERIFIABLE',
-    sub: 'ORCA could not obtain enough data to judge — this is not the same as safe',
+    sub: 'ORCA could not obtain enough current data to judge; this does not mean safe',
     icon: HelpCircle,
     text: 'text-ink-1',
     ring: 'border-hairline-strong',
@@ -79,25 +72,173 @@ const VERDICT_STYLES: Record<
   },
 };
 
-const COMPONENT_LABELS: Record<string, string> = {
+const COMPONENT_LABELS: Record<RiskComponent['name'], string> = {
   wave: 'Significant wave height',
   wind: 'Wind speed',
   visibility: 'Visibility',
-  lightning: 'Convective potential (CAPE proxy)',
+  lightning: 'Convective-risk proxy',
 };
 
-export function VerdictCard({ result, compact = false }: { result: RiskResult; compact?: boolean }) {
-  const [showMath, setShowMath] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+function limitText(component: RiskComponent): string {
+  if (component.name === 'visibility') {
+    return `minimum ${component.limit} ${component.unit}`;
+  }
+  if (component.name === 'lightning') {
+    return `hard veto at ${component.limit}${component.unit}`;
+  }
+  return `limit ${component.limit} ${component.unit}`;
+}
+
+function CurrentConditions({ result }: { result: RiskResult }) {
+  const capeEvidence = result.evidence.find(
+    (item) => item.variable === 'convective_energy' && typeof item.value === 'number',
+  );
+  const cape = typeof capeEvidence?.value === 'number' ? capeEvidence.value : null;
+
+  return (
+    <div className="border-hairline border-t px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="label">Current-condition analysis</span>
+        <span className="text-ink-3 truncate text-right text-2xs">{result.boat_class_label}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {result.components.map((component) => (
+          <div
+            key={component.name}
+            className={clsx(
+              'rounded border px-2.5 py-2',
+              component.exceeded
+                ? 'border-red/35 bg-red/8'
+                : component.value === null
+                  ? 'border-amber/25 bg-amber/5'
+                  : 'border-hairline bg-abyss-0/35',
+            )}
+          >
+            <div className="text-ink-2 truncate text-2xs uppercase tracking-[0.08em]">
+              {COMPONENT_LABELS[component.name]}
+            </div>
+            <div className="mt-0.5 flex items-baseline justify-between gap-1.5">
+              <span
+                className={clsx(
+                  'data text-sm font-semibold',
+                  component.exceeded
+                    ? 'text-red'
+                    : component.value === null
+                      ? 'text-amber'
+                      : 'text-ink-0',
+                )}
+              >
+                {component.value === null ? 'NO DATA' : `${component.value} ${component.unit}`}
+              </span>
+              <span
+                className={clsx(
+                  'shrink-0 text-[9px] font-semibold uppercase',
+                  component.exceeded ? 'text-red' : 'text-jade',
+                )}
+              >
+                {component.value === null
+                  ? 'unverified'
+                  : component.exceeded
+                    ? 'limit exceeded'
+                    : 'within limit'}
+              </span>
+            </div>
+            <p className="text-ink-3 mt-1 text-[10px] leading-snug">
+              Safety score {component.score.toFixed(0)}/100; {limitText(component)}
+              {component.name === 'lightning' && cape !== null
+                ? `; derived from CAPE ${cape} J/kg, not a detected strike`
+                : ''}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BoundaryRow({ proximity }: { proximity: Proximity }) {
+  const isIndiaEez = proximity.kind === 'eez' || proximity.fence === 'eez_india';
+  const dangerous = isIndiaEez ? !proximity.inside : proximity.kind === 'imbl';
+  const label = isIndiaEez
+    ? proximity.inside
+      ? "Inside India's EEZ"
+      : "Outside India's EEZ"
+    : proximity.name;
+
+  return (
+    <div
+      className={clsx(
+        'rounded border px-2.5 py-2',
+        dangerous ? 'border-red/35 bg-red/8' : 'border-jade/25 bg-jade/5',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className={clsx('text-xs font-medium', dangerous ? 'text-red' : 'text-jade')}>
+          {label}
+        </span>
+        <span className="data text-ink-1 shrink-0 text-2xs">
+          {proximity.distance_km.toFixed(1)} km to line
+        </span>
+      </div>
+      <p className="text-ink-2 mt-1 text-[10px] leading-snug">
+        {isIndiaEez
+          ? dangerous
+            ? 'Current-position jurisdiction warning; this is separate from the weather score.'
+            : 'Current position is within the indexed Indian maritime jurisdiction polygon.'
+          : proximity.narrative}
+      </p>
+    </div>
+  );
+}
+
+function CurrentBoundary({ check }: { check: GeofenceCheck | null | undefined }) {
+  if (!check) return null;
+
+  const indiaEez = check.proximities.find(
+    (item) => item.kind === 'eez' || item.fence === 'eez_india',
+  );
+  const nearbyImbl = check.proximities.filter(
+    (item) =>
+      item.kind === 'imbl' &&
+      (item.distance_km <= 25 || ['approaching', 'crossed', 'exited'].includes(item.state)),
+  );
+  const rows = [...(indiaEez ? [indiaEez] : []), ...nearbyImbl];
+
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="border-hairline border-t px-4 py-3">
+      <div className="label mb-2">Current boundary check</div>
+      <div className="space-y-2">
+        {rows.map((row) => (
+          <BoundaryRow key={row.fence} proximity={row} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function VerdictCard({
+  result,
+  geofence,
+  onCollapse,
+}: {
+  result: RiskResult;
+  geofence?: GeofenceCheck | null;
+  onCollapse?: () => void;
+}) {
   const style = VERDICT_STYLES[result.verdict];
   const Icon = style.icon;
+  const summary =
+    result.verdict === 'NO-GO' && result.vetoes.length === 0
+      ? 'The combined current-condition score is below the safe threshold'
+      : style.sub;
 
   return (
     <div
       className={clsx('glass overflow-hidden rounded-lg border', style.ring, style.glow)}
       style={{ animation: 'orca-rise 260ms var(--ease-out-instrument)' }}
     >
-      {/* ---- verdict ---- */}
       <div className="flex items-start gap-3 p-4 pb-3">
         <Icon className={clsx('mt-0.5 h-7 w-7 shrink-0', style.text)} aria-hidden />
         <div className="min-w-0 flex-1">
@@ -112,26 +253,19 @@ export function VerdictCard({ result, compact = false }: { result: RiskResult; c
               </span>
             )}
           </div>
-          <p className="text-ink-1 mt-1 text-xs leading-snug">{style.sub}</p>
+          <p className="text-ink-1 mt-1 text-xs leading-snug">{summary}</p>
         </div>
         <button
           type="button"
-          onClick={() => setCollapsed((value) => !value)}
+          onClick={onCollapse}
           className="text-ink-2 hover:bg-abyss-2/70 hover:text-cyan -mt-1 -mr-1 rounded p-1.5 transition-colors"
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? 'Expand safety verdict' : 'Collapse safety verdict'}
-          title={collapsed ? 'Expand safety verdict' : 'Collapse safety verdict'}
+          aria-label="Collapse safety verdict horizontally"
+          title="Hide this card and expose more of the sea"
         >
-          <ChevronDown
-            className={clsx('h-4 w-4 transition-transform', !collapsed && 'rotate-180')}
-            aria-hidden
-          />
+          <ChevronRight className="h-4 w-4" aria-hidden />
         </button>
       </div>
 
-      {!collapsed && (
-        <>
-      {/* ---- index bar ---- */}
       {result.verdict !== 'UNVERIFIABLE' && (
         <div className="px-4 pb-3">
           <div className="bg-abyss-0 relative h-1.5 overflow-hidden rounded-full">
@@ -139,9 +273,8 @@ export function VerdictCard({ result, compact = false }: { result: RiskResult; c
               className={clsx('h-full rounded-full transition-[width] duration-700', style.bar)}
               style={{ width: `${result.index}%` }}
             />
-            {/* The GO and CAUTION thresholds, marked so the score has meaning. */}
-            <div className="absolute inset-y-0 left-[40%] w-px bg-white/25" title="CAUTION ≥ 40" />
-            <div className="absolute inset-y-0 left-[70%] w-px bg-white/25" title="GO ≥ 70" />
+            <div className="absolute inset-y-0 left-[40%] w-px bg-white/25" title="CAUTION at 40" />
+            <div className="absolute inset-y-0 left-[70%] w-px bg-white/25" title="GO at 70" />
           </div>
           <div className="text-ink-3 mt-1 flex justify-between font-mono text-2xs">
             <span>0</span>
@@ -152,11 +285,10 @@ export function VerdictCard({ result, compact = false }: { result: RiskResult; c
         </div>
       )}
 
-      {/* ---- vetoes: the most valuable strings in the system ---- */}
       {result.vetoes.length > 0 && (
         <div className="px-4 py-3">
           <div className="label text-red mb-1.5">
-            {result.vetoes.length} hard {result.vetoes.length === 1 ? 'veto' : 'vetoes'} — these
+            {result.vetoes.length} hard {result.vetoes.length === 1 ? 'veto' : 'vetoes'}; these
             override the score
           </div>
           <ul className="space-y-1.5">
@@ -170,145 +302,18 @@ export function VerdictCard({ result, compact = false }: { result: RiskResult; c
         </div>
       )}
 
-      {/* ---- the refusal to guess ---- */}
       {result.escalate && result.escalation_message && (
         <div className="border-amber/25 bg-amber/8 mx-4 mb-3 rounded border px-3 py-2">
           <div className="label text-amber mb-1 flex items-center gap-1">
             <AlertTriangle className="h-3 w-3" aria-hidden />
-            Low confidence — escalating rather than guessing
+            Current data is insufficient
           </div>
           <p className="text-ink-1 text-xs leading-snug">{result.escalation_message}</p>
         </div>
       )}
 
-      {/* ---- what would change it ---- */}
-      {result.what_would_change_it.length > 0 && (
-        <div className="border-hairline border-t px-4 py-3">
-          <div className="label mb-1.5">What would change this</div>
-          <ul className="space-y-1">
-            {result.what_would_change_it.map((item) => (
-              <li key={item} className="text-ink-1 flex items-start gap-2 text-xs leading-snug">
-                <span className="text-cyan mt-1.5 h-1 w-1 shrink-0 rounded-full bg-current" />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* ---- components, with the arithmetic on demand ---- */}
-      {!compact && (
-        <div className="border-hairline border-t">
-          <button
-            type="button"
-            onClick={() => setShowMath((v) => !v)}
-            className="hover:bg-abyss-2/60 flex w-full items-center gap-2 px-4 py-2 text-left transition-colors"
-            aria-expanded={showMath}
-          >
-            <span className="label flex-1">
-              Components · {result.boat_class_label}
-            </span>
-            <ChevronDown
-              className={clsx(
-                'text-ink-2 h-3.5 w-3.5 transition-transform',
-                showMath && 'rotate-180',
-              )}
-              aria-hidden
-            />
-          </button>
-
-          {showMath && (
-            <div className="px-4 pb-3">
-              <table className="w-full text-2xs">
-                <thead>
-                  <tr className="text-ink-3 border-hairline border-b">
-                    <th className="py-1 text-left font-medium">Input</th>
-                    <th className="py-1 text-right font-medium">Value</th>
-                    <th className="py-1 text-right font-medium">Limit</th>
-                    <th className="py-1 text-right font-medium">Score</th>
-                    <th className="py-1 text-right font-medium">×w</th>
-                  </tr>
-                </thead>
-                <tbody className="data">
-                  {result.components.map((c) => (
-                    <tr key={c.name} className="border-hairline/60 border-b last:border-0">
-                      <td
-                        className={clsx('py-1.5 pr-2', c.exceeded ? 'text-red' : 'text-ink-1')}
-                        title={COMPONENT_LABELS[c.name]}
-                      >
-                        {c.exceeded && <span aria-hidden>⚠ </span>}
-                        {c.name}
-                      </td>
-                      <td className={clsx('py-1.5 text-right', c.exceeded ? 'text-red' : 'text-ink-0')}>
-                        {c.value === null ? '—' : `${c.value} ${c.unit}`}
-                      </td>
-                      <td className="text-ink-2 py-1.5 text-right">
-                        {c.limit} {c.unit}
-                      </td>
-                      <td className="text-ink-0 py-1.5 text-right">{c.score.toFixed(0)}</td>
-                      <td className="text-cyan py-1.5 text-right">{c.contribution.toFixed(1)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* The formulas. This is the difference between a number and an
-                  explanation, and it is cheap to show. */}
-              <div className="border-hairline mt-2 space-y-0.5 border-t pt-2">
-                {result.components.map((c) => (
-                  <div key={c.name} className="text-ink-3 data flex gap-2 text-2xs">
-                    <span className="w-16 shrink-0">{c.name}</span>
-                    <span className="truncate" title={c.formula}>
-                      {c.formula}
-                    </span>
-                  </div>
-                ))}
-                <div className="text-ink-1 data flex gap-2 pt-1 text-2xs">
-                  <span className="w-16 shrink-0">index</span>
-                  <span>
-                    {result.components.map((c) => c.contribution.toFixed(1)).join(' + ')} ={' '}
-                    <span className="text-cyan">{result.index.toFixed(1)}</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ---- footer: evidence count, data age, the standing disclaimer ---- */}
-      <div className="border-hairline bg-abyss-0/50 border-t px-4 py-2">
-        <div className="flex items-center gap-2 text-2xs">
-          <Radio className="text-slate-live h-3 w-3 shrink-0" aria-hidden />
-          <span className="text-ink-2">
-            <span className="data text-ink-1">{result.evidence.length}</span> evidence items
-          </span>
-          <span className="text-ink-3">·</span>
-          <span className="text-ink-2">
-            {result.data_age_hours < 0.05 ? (
-              <>
-                data <span className="data text-ink-1">current</span>
-              </>
-            ) : (
-              <>
-                data <span className="data text-ink-1">{result.data_age_hours.toFixed(1)} h</span> old
-              </>
-            )}
-          </span>
-          <ProvenanceBadge
-            provenance={result.confidence === 'high' ? 'live' : 'cached'}
-            size="xs"
-            showLabel={false}
-            title={`Confidence: ${result.confidence}`}
-          />
-        </div>
-        <p className="text-ink-3 mt-1.5 flex items-start gap-1 text-2xs leading-tight">
-          <Info className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
-          <span>{result.disclaimer}</span>
-        </p>
-      </div>
-        </>
-      )}
+      <CurrentConditions result={result} />
+      <CurrentBoundary check={geofence} />
     </div>
   );
 }

@@ -36,19 +36,12 @@ export function TreatmentRail({
       <button
         type="button"
         onClick={() => onToggle(true)}
-        className="glass pointer-events-auto flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-white/5"
-        title="Visual treatments"
+        className="glass pointer-events-auto flex h-10 w-10 items-center justify-center rounded-lg p-0 transition-colors hover:bg-white/5"
+        title={`Visual treatments: ${current.label}${fps > 0 ? `, ${Math.round(fps)} fps` : ''}`}
+        aria-label="Visual treatments"
       >
         <Palette className="text-cyan h-3.5 w-3.5" aria-hidden />
-        <span className="label">{current.label}</span>
-        {fps > 0 && (
-          <span
-            className={clsx('data text-2xs', fps < 40 ? 'text-amber' : 'text-ink-3')}
-            title="Median frame rate over the last second"
-          >
-            {Math.round(fps)} fps
-          </span>
-        )}
+        <span className="sr-only">View</span>
       </button>
     );
   }

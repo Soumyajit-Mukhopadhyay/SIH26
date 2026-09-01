@@ -19,6 +19,8 @@ interface Point {
 
 interface Props {
   point: Point | null;
+  open: boolean;
+  onToggle: (open: boolean) => void;
 }
 
 const STATUS_CLASS: Record<ValidationStatus, string> = {
@@ -38,11 +40,10 @@ function when(value: string): string {
   }).format(new Date(value));
 }
 
-export function OperationalIntelPanel({ point }: Props) {
+export function OperationalIntelPanel({ point, open, onToggle }: Props) {
   const pointKey = point ? `${point.lat}:${point.lon}` : '';
   const currentPointKey = useRef(pointKey);
   currentPointKey.current = pointKey;
-  const [open, setOpen] = useState(false);
   const [overpasses, setOverpasses] = useState<OverpassResponse | null>(null);
   const [validation, setValidation] = useState<CrossValidationResponse | null>(null);
   const [ais, setAis] = useState<AisSnapshot | null>(null);
@@ -152,27 +153,45 @@ export function OperationalIntelPanel({ point }: Props) {
   }
 
   return (
-    <div className="glass pointer-events-auto w-[22rem] rounded-lg">
+    <div
+      className={clsx(
+        'glass pointer-events-auto rounded-lg transition-[width]',
+        open ? 'w-[22rem]' : 'w-10',
+      )}
+    >
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        onClick={() => onToggle(!open)}
+        className={clsx(
+          'flex w-full items-center gap-2 text-left',
+          open ? 'px-3 py-2' : 'h-10 justify-center p-0',
+        )}
         disabled={!point}
+        aria-label="Orbital & vessel intelligence"
       >
         <Satellite className="text-cyan h-3.5 w-3.5" aria-hidden />
-        <span className="label">Orbital &amp; vessel intelligence</span>
-        <span className="text-ink-2 ml-auto max-w-40 truncate text-2xs">
-          {!point
-            ? 'select sea'
-            : busy === 'overpass'
-              ? 'calculating…'
-              : next
-                ? `${next.satellite} · ${when(next.closest_time)}`
-                : overpasses?.unavailable_satellites.length
-                  ? 'orbit data incomplete'
-                : 'no pass in 48 h'}
+        <span className={clsx('label', !open && 'sr-only')}>
+          {open ? 'Orbital & vessel intelligence' : 'Marine intel'}
         </span>
-        <ChevronDown className={clsx('h-3 w-3 transition-transform', open && 'rotate-180')} />
+        {open && (
+          <span className="text-ink-2 ml-auto max-w-40 truncate text-2xs">
+            {!point
+              ? 'select sea'
+              : busy === 'overpass'
+                ? 'calculating…'
+                : next
+                  ? `${next.satellite} · ${when(next.closest_time)}`
+                  : overpasses?.unavailable_satellites.length
+                    ? 'orbit data incomplete'
+                    : 'no pass in 48 h'}
+          </span>
+        )}
+        <ChevronDown
+          className={clsx(
+            'h-3 w-3 transition-transform',
+            open ? 'rotate-180' : 'hidden',
+          )}
+        />
       </button>
 
       {open && point && (

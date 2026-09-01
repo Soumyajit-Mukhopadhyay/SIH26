@@ -154,16 +154,18 @@ export function AlertRail({
           onToggle(true);
           onOpen();
         }}
-        className="glass pointer-events-auto relative flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-white/5"
+        className="glass pointer-events-auto relative flex h-10 w-10 items-center justify-center rounded-lg p-0 transition-colors hover:bg-white/5"
         title="Alert centre"
       >
         <BellRing
           className={clsx('h-3.5 w-3.5', unseen > 0 ? 'text-red' : 'text-ink-2')}
           aria-hidden
         />
-        <span className="label">Alerts</span>
+        <span className="sr-only">Alerts</span>
         {unseen > 0 && (
-          <span className="bg-red/25 text-red data rounded-full px-1.5 text-2xs">{unseen}</span>
+          <span className="bg-red/25 text-red data absolute -top-1 -right-1 rounded-full px-1.5 text-2xs">
+            {unseen}
+          </span>
         )}
         {!connected && <WifiOff className="text-amber h-2.5 w-2.5" aria-hidden />}
       </button>

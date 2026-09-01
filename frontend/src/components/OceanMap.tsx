@@ -39,6 +39,8 @@ export interface OceanMapHandle {
   resetView: () => void;
 }
 
+export type MapSurface = 'water' | 'land' | 'unknown';
+
 export function OceanMap({
   ref,
   layers = [],
@@ -48,7 +50,7 @@ export function OceanMap({
 }: {
   ref?: React.Ref<OceanMapHandle>;
   layers?: Layer[];
-  onClick?: (lon: number, lat: number) => void;
+  onClick?: (lon: number, lat: number, surface: MapSurface) => void;
   onReady?: () => void;
   className?: string;
 }) {
@@ -184,7 +186,44 @@ export function OceanMap({
     });
 
     map.on('click', (event) => {
-      clickRef.current?.(event.lngLat.lng, event.lngLat.lat);
+      // OpenFreeMap paints land with the background and water with vector
+      // polygons. Querying those water fills lets the UI stop an inland click
+      // before it is incorrectly described as an offshore EEZ violation.
+      const waterLayerSpecs = map
+        .getStyle()
+        .layers.filter((layer) => {
+          if (layer.type !== 'fill') return false;
+          const id = layer.id.toLowerCase();
+          const sourceLayer =
+            'source-layer' in layer && typeof layer['source-layer'] === 'string'
+              ? layer['source-layer'].toLowerCase()
+              : '';
+          return (
+            id.includes('water') ||
+            id.includes('ocean') ||
+            id.includes('sea') ||
+            sourceLayer.includes('water')
+          );
+        });
+      const waterLayers = waterLayerSpecs.map((layer) => layer.id);
+      const waterSources = [
+        ...new Set(
+          waterLayerSpecs.flatMap((layer) =>
+            'source' in layer && typeof layer.source === 'string' ? [layer.source] : [],
+          ),
+        ),
+      ];
+      let surface: MapSurface = 'unknown';
+      if (
+        waterLayers.length > 0 &&
+        waterSources.length > 0 &&
+        waterSources.every((source) => map.isSourceLoaded(source))
+      ) {
+        surface = map.queryRenderedFeatures(event.point, { layers: waterLayers }).length
+          ? 'water'
+          : 'land';
+      }
+      clickRef.current?.(event.lngLat.lng, event.lngLat.lat, surface);
     });
 
     map.on('error', (event) => {

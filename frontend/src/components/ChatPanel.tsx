@@ -278,6 +278,7 @@ export function ChatPanel({
   speak,
   onSpeak,
   voices,
+  onClose,
 }: {
   run: AgentRun;
   onAsk: (question: string) => void;
@@ -289,6 +290,7 @@ export function ChatPanel({
   speak: boolean;
   onSpeak: (on: boolean) => void;
   voices: VoiceOption[];
+  onClose: () => void;
 }) {
   const [draft, setDraft] = useState('');
   const scroller = useRef<HTMLDivElement>(null);
@@ -321,21 +323,32 @@ export function ChatPanel({
       <div className="border-hairline flex items-center gap-1.5 border-b px-3 py-2">
         <MessageSquare className="text-cyan h-3.5 w-3.5" aria-hidden />
         <span className="label">Ask ORCA</span>
-        {run.running && (
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          {run.running && (
+            <button
+              type="button"
+              onClick={onStop}
+              className="text-ink-2 hover:text-red flex items-center gap-1 text-2xs transition-colors"
+            >
+              <Square className="h-2.5 w-2.5" aria-hidden />
+              stop
+            </button>
+          )}
+          {!run.running && run.final?.llm_provider && (
+            <span className="data text-ink-3 max-w-40 truncate text-2xs">
+              answered by {run.final.llm_provider}
+            </span>
+          )}
           <button
             type="button"
-            onClick={onStop}
-            className="text-ink-2 hover:text-red ml-auto flex items-center gap-1 text-2xs transition-colors"
+            onClick={onClose}
+            className="text-ink-2 hover:bg-abyss-2/70 hover:text-cyan rounded p-1 transition-colors"
+            aria-label="Close Ask ORCA chat"
+            title="Close chat to a floating AI button"
           >
-            <Square className="h-2.5 w-2.5" aria-hidden />
-            stop
+            <X className="h-3.5 w-3.5" aria-hidden />
           </button>
-        )}
-        {!run.running && run.final?.llm_provider && (
-          <span className="data text-ink-3 ml-auto text-2xs">
-            answered by {run.final.llm_provider}
-          </span>
-        )}
+        </div>
       </div>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">

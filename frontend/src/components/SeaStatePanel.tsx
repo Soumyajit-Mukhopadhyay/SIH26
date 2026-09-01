@@ -24,12 +24,25 @@
  */
 
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Maximize2, Minimize2, Waves } from 'lucide-react';
+import { AlertTriangle, Maximize2, Minimize2, Satellite, Waves } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { PointForecast, ThresholdClass } from '@/lib/types';
 import { SeaStateScene } from '@/scenes/SeaState';
 import { seaStateFrom, wavelength } from '@/scenes/waves';
 import { ProvenanceBadge } from '@/components/ProvenanceBadge';
+import {
+  SatelliteObservation,
+  type SatelliteView,
+} from '@/components/SatelliteObservation';
+
+type ViewMode = 'forecast' | SatelliteView;
+
+const VIEW_OPTIONS: Array<{ mode: ViewMode; short: string; title: string }> = [
+  { mode: 'forecast', short: 'Forecast', title: 'Forecast sea simulation' },
+  { mode: 'sentinel3', short: 'S3 Ocean', title: 'Copernicus Sentinel-3 OLCI · 300 m' },
+  { mode: 'nasa', short: 'NASA NRT', title: 'NASA VIIRS/MODIS near-real-time browse imagery' },
+  { mode: 'sentinel2', short: 'S2 10 m', title: 'Copernicus Sentinel-2 L2A · 10 m' },
+];
 
 /** A numeric evidence value, or null when it is not a usable number. */
 function numeric(forecast: PointForecast | null, variable: string): number | null {
@@ -83,6 +96,7 @@ export function SeaStatePanel({
   onToggle: (open: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('forecast');
 
   const waveHeightM = numeric(forecast, 'wave_height');
   const periodS = numeric(forecast, 'wave_period');
@@ -132,16 +146,26 @@ export function SeaStatePanel({
         // Bounded by the gap between the chat panel and the verdict rail: at
         // 54rem the expanded panel slid underneath the verdict card, and the
         // verdict is the one thing on this page nothing may cover.
-        expanded ? 'h-[34rem] w-[38rem]' : 'h-[19rem] w-[30rem]',
+        expanded ? 'h-[34rem] w-[38rem]' : 'h-[23rem] w-[30rem]',
       )}
       style={{ transition: 'width 220ms var(--ease-out-instrument), height 220ms var(--ease-out-instrument)' }}
+      data-orca="sea-state-panel"
     >
       <div className="border-hairline flex items-center gap-1.5 border-b px-3 py-2">
-        <Waves className="text-cyan h-3.5 w-3.5" aria-hidden />
+        {viewMode === 'forecast' ? (
+          <Waves className="text-cyan h-3.5 w-3.5" aria-hidden />
+        ) : (
+          <Satellite className="text-cyan h-3.5 w-3.5" aria-hidden />
+        )}
         <span className="label">Sea view</span>
-        {model && (
+        {model && viewMode === 'forecast' && (
           <span className="data text-ink-3 text-2xs">
             {model.wavelength.toFixed(0)} m wavelength · {loaM} m hull
+          </span>
+        )}
+        {viewMode !== 'forecast' && (
+          <span className="text-ink-3 truncate text-2xs">
+            {VIEW_OPTIONS.find((option) => option.mode === viewMode)?.title}
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">
@@ -161,14 +185,44 @@ export function SeaStatePanel({
             type="button"
             onClick={() => onToggle(false)}
             className="text-ink-3 hover:text-ink-1 text-2xs transition-colors"
+            aria-label="Close sea view"
           >
             close
           </button>
         </div>
       </div>
 
+      <div className="border-hairline bg-abyss-0/45 grid grid-cols-4 gap-1 border-b p-1">
+        {VIEW_OPTIONS.map((option) => (
+          <button
+            key={option.mode}
+            type="button"
+            onClick={() => setViewMode(option.mode)}
+            disabled={option.mode !== 'forecast' && !forecast}
+            className={clsx(
+              'flex min-w-0 items-center justify-center gap-1 rounded px-1.5 py-1.5 text-[9px] whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+              viewMode === option.mode
+                ? 'bg-cyan/12 text-cyan'
+                : 'text-ink-2 hover:bg-white/4 hover:text-ink-0',
+            )}
+            aria-pressed={viewMode === option.mode}
+            aria-label={option.title}
+            title={option.title}
+          >
+            {option.mode === 'forecast' ? (
+              <Waves className="h-3 w-3 shrink-0" aria-hidden />
+            ) : (
+              <Satellite className="h-3 w-3 shrink-0" aria-hidden />
+            )}
+            <span className="truncate">{option.short}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="relative min-h-0 flex-1">
-        {inputs ? (
+        {viewMode !== 'forecast' ? (
+          <SatelliteObservation forecast={forecast} view={viewMode} />
+        ) : inputs ? (
           <>
             <SeaStateScene inputs={inputs} />
 
@@ -247,12 +301,32 @@ export function SeaStatePanel({
       </div>
 
       <div className="border-hairline border-t px-3 py-1.5">
-        <p className="text-ink-3 text-2xs leading-snug">
-          Amplitude from Hs, wavelength from the deep-water dispersion relation L = gT²/2π
-          {periodS ? ` (${wavelength(periodS).toFixed(0)} m at ${periodS.toFixed(1)} s)` : ''}, travel
-          direction from the reported "from" bearing. Foam, sky and chop period are texture, not
-          measurement.
-        </p>
+        {viewMode === 'forecast' ? (
+          <p className="text-ink-3 text-2xs leading-snug">
+            Amplitude from Hs, wavelength from the deep-water dispersion relation L = gT²/2π
+            {periodS
+              ? ` (${wavelength(periodS).toFixed(0)} m at ${periodS.toFixed(1)} s)`
+              : ''}
+            , travel direction from the reported "from" bearing. Foam, sky and chop period are
+            texture, not measurement.
+          </p>
+        ) : viewMode === 'sentinel3' ? (
+          <p className="text-ink-3 text-2xs leading-snug">
+            Optical observation from the most recent Sentinel-3 OLCI overpass in the last seven
+            days. It shows what the satellite saw then—not present wave height or live video.
+          </p>
+        ) : viewMode === 'nasa' ? (
+          <p className="text-ink-3 text-2xs leading-snug">
+            NASA GIBS selects the newest available NOAA-21/NOAA-20 VIIRS or Aqua MODIS daily
+            corrected-reflectance view. The exact satellite and native resolution appear on-image.
+          </p>
+        ) : (
+          <p className="text-ink-3 text-2xs leading-snug">
+            Sentinel-2 provides 10 m coastal detail. ORCA selects the newest scene at or below 40%
+            catalogue cloud cover when possible and always shows its acquisition time and cloud
+            percentage.
+          </p>
+        )}
       </div>
     </div>
   );
