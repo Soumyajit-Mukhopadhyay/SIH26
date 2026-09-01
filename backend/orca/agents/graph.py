@@ -467,9 +467,9 @@ def _structured_report(results: list[dict[str, Any]]) -> str | None:
     if route and "destination" in str(route.get("error", "")).lower():
         return (
             "**I cannot calculate a safe route until you give me a destination.**\n\n"
-            "Send the destination port, fishing ground, or latitude/longitude. No route or "
-            "route-safety conclusion has been made yet.\n\n"
-            "**In short:** Tell me where you want to go, and I will screen the path against "
+            "Select the destination point in the Route Planner. No route or route-safety "
+            "conclusion has been made yet.\n\n"
+            "**In short:** Choose the endpoint on the map, then ORCA can screen the path against "
             "weather, sea state and geofencing limits."
         )
 
