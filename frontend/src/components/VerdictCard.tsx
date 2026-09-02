@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   ChevronRight,
   HelpCircle,
+  MapPin,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type {
@@ -89,25 +90,34 @@ function limitText(component: RiskComponent): string {
   return `limit ${component.limit} ${component.unit}`;
 }
 
-function CurrentConditions({ result }: { result: RiskResult }) {
+function CurrentConditions({ result, landPoint = false }: { result: RiskResult; landPoint?: boolean }) {
   const capeEvidence = result.evidence.find(
     (item) => item.variable === 'convective_energy' && typeof item.value === 'number',
   );
   const cape = typeof capeEvidence?.value === 'number' ? capeEvidence.value : null;
+  const components = landPoint
+    ? result.components.filter((component) => component.name !== 'wave')
+    : result.components;
 
   return (
     <div className="border-hairline border-t px-4 py-3">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="label">Current-condition analysis</span>
-        <span className="text-ink-3 truncate text-right text-2xs">{result.boat_class_label}</span>
+        <span className="label">
+          {landPoint ? 'Atmospheric analysis' : 'Current-condition analysis'}
+        </span>
+        {!landPoint && (
+          <span className="text-ink-3 truncate text-right text-2xs">
+            {result.boat_class_label}
+          </span>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-2">
-        {result.components.map((component) => (
+        {components.map((component) => (
           <div
             key={component.name}
             className={clsx(
               'rounded border px-2.5 py-2',
-              component.exceeded
+              !landPoint && component.exceeded
                 ? 'border-red/35 bg-red/8'
                 : component.value === null
                   ? 'border-amber/25 bg-amber/5'
@@ -121,7 +131,7 @@ function CurrentConditions({ result }: { result: RiskResult }) {
               <span
                 className={clsx(
                   'data text-sm font-semibold',
-                  component.exceeded
+                  !landPoint && component.exceeded
                     ? 'text-red'
                     : component.value === null
                       ? 'text-amber'
@@ -133,21 +143,33 @@ function CurrentConditions({ result }: { result: RiskResult }) {
               <span
                 className={clsx(
                   'shrink-0 text-[9px] font-semibold uppercase',
-                  component.exceeded ? 'text-red' : 'text-jade',
+                  !landPoint && component.exceeded ? 'text-red' : 'text-jade',
                 )}
               >
                 {component.value === null
                   ? 'unverified'
-                  : component.exceeded
+                  : landPoint
+                    ? 'observed'
+                    : component.exceeded
                     ? 'limit exceeded'
                     : 'within limit'}
               </span>
             </div>
             <p className="text-ink-3 mt-1 text-[10px] leading-snug">
-              Safety score {component.score.toFixed(0)}/100; {limitText(component)}
-              {component.name === 'lightning' && cape !== null
-                ? `; derived from CAPE ${cape} J/kg, not a detected strike`
-                : ''}
+              {landPoint ? (
+                component.name === 'lightning' && cape !== null ? (
+                  <>Derived from CAPE {cape} J/kg; not a detected lightning strike</>
+                ) : (
+                  <>Atmospheric value at the selected land grid cell</>
+                )
+              ) : (
+                <>
+                  Safety score {component.score.toFixed(0)}/100; {limitText(component)}
+                  {component.name === 'lightning' && cape !== null
+                    ? `; derived from CAPE ${cape} J/kg, not a detected strike`
+                    : ''}
+                </>
+              )}
             </p>
           </div>
         ))}
@@ -221,32 +243,47 @@ function CurrentBoundary({ check }: { check: GeofenceCheck | null | undefined })
 export function VerdictCard({
   result,
   geofence,
+  landPoint = false,
   onCollapse,
 }: {
   result: RiskResult;
   geofence?: GeofenceCheck | null;
+  landPoint?: boolean;
   onCollapse?: () => void;
 }) {
   const style = VERDICT_STYLES[result.verdict];
-  const Icon = style.icon;
-  const summary =
-    result.verdict === 'NO-GO' && result.vetoes.length === 0
+  const Icon = landPoint ? MapPin : style.icon;
+  const summary = landPoint
+    ? 'Atmospheric conditions only — maritime safety, PFZ and EEZ checks do not apply on land'
+    : result.verdict === 'NO-GO' && result.vetoes.length === 0
       ? 'The combined current-condition score is below the safe threshold'
       : style.sub;
 
   return (
     <div
-      className={clsx('glass overflow-hidden rounded-lg border', style.ring, style.glow)}
+      className={clsx(
+        'glass overflow-hidden rounded-lg border',
+        landPoint ? 'border-cyan/40' : style.ring,
+        !landPoint && style.glow,
+      )}
       style={{ animation: 'orca-rise 260ms var(--ease-out-instrument)' }}
     >
       <div className="flex items-start gap-3 p-4 pb-3">
-        <Icon className={clsx('mt-0.5 h-7 w-7 shrink-0', style.text)} aria-hidden />
+        <Icon
+          className={clsx('mt-0.5 h-7 w-7 shrink-0', landPoint ? 'text-cyan' : style.text)}
+          aria-hidden
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2.5">
-            <span className={clsx('data text-2xl leading-none font-bold tracking-tight', style.text)}>
-              {style.label}
+            <span
+              className={clsx(
+                'data text-2xl leading-none font-bold tracking-tight',
+                landPoint ? 'text-cyan' : style.text,
+              )}
+            >
+              {landPoint ? 'LAND POINT' : style.label}
             </span>
-            {result.verdict !== 'UNVERIFIABLE' && (
+            {!landPoint && result.verdict !== 'UNVERIFIABLE' && (
               <span className="data text-ink-1 text-sm">
                 {result.index.toFixed(1)}
                 <span className="text-ink-3">/100</span>
@@ -266,7 +303,7 @@ export function VerdictCard({
         </button>
       </div>
 
-      {result.verdict !== 'UNVERIFIABLE' && (
+      {!landPoint && result.verdict !== 'UNVERIFIABLE' && (
         <div className="px-4 pb-3">
           <div className="bg-abyss-0 relative h-1.5 overflow-hidden rounded-full">
             <div
@@ -285,7 +322,7 @@ export function VerdictCard({
         </div>
       )}
 
-      {result.vetoes.length > 0 && (
+      {!landPoint && result.vetoes.length > 0 && (
         <div className="px-4 py-3">
           <div className="label text-red mb-1.5">
             {result.vetoes.length} hard {result.vetoes.length === 1 ? 'veto' : 'vetoes'}; these
@@ -302,7 +339,7 @@ export function VerdictCard({
         </div>
       )}
 
-      {result.escalate && result.escalation_message && (
+      {!landPoint && result.escalate && result.escalation_message && (
         <div className="border-amber/25 bg-amber/8 mx-4 mb-3 rounded border px-3 py-2">
           <div className="label text-amber mb-1 flex items-center gap-1">
             <AlertTriangle className="h-3 w-3" aria-hidden />
@@ -312,8 +349,8 @@ export function VerdictCard({
         </div>
       )}
 
-      <CurrentConditions result={result} />
-      <CurrentBoundary check={geofence} />
+      <CurrentConditions result={result} landPoint={landPoint} />
+      {!landPoint && <CurrentBoundary check={geofence} />}
     </div>
   );
 }

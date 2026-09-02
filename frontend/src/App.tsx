@@ -103,10 +103,31 @@ interface Selection {
   lon: number;
   lat: number;
   label?: string;
+  surface: MapSurface;
+}
+
+const MARINE_EVIDENCE = new Set([
+  'wave_height',
+  'wave_period',
+  'swell_height',
+  'wave_direction',
+  'sst',
+  'sst_satellite',
+  'sst_uncertainty',
+  'sea_surface_current',
+  'sea_surface_current_direction',
+]);
+
+function resolvedSurface(requested: MapSurface, pointForecast: PointForecast): MapSurface {
+  if (requested !== 'unknown') return requested;
+  return Object.keys(pointForecast.evidence).some((variable) => MARINE_EVIDENCE.has(variable))
+    ? 'water'
+    : 'land';
 }
 
 export default function App() {
   const mapRef = useRef<OceanMapHandle>(null);
+  const pointQueryEpoch = useRef(0);
 
   const [health, setHealth] = useState<Health | null>(null);
   const [freshness, setFreshness] = useState<FreshnessReport | null>(null);
@@ -293,26 +314,66 @@ export default function App() {
 
   // ---- the core interaction ----
   const query = useCallback(
-    async (lon: number, lat: number, label?: string, loa = loaM) => {
-      setSelection({ lon, lat, label });
+    async (
+      lon: number,
+      lat: number,
+      label?: string,
+      loa = loaM,
+      requestedSurface: MapSurface = 'unknown',
+    ) => {
+      const queryEpoch = ++pointQueryEpoch.current;
+      setSelection({ lon, lat, label, surface: requestedSurface });
       setLoading(true);
       setError(null);
+      if (requestedSurface === 'land') {
+        setGeofence(null);
+        setRouteDestination(null);
+        setRoutePlan(null);
+        setPickingDestination(false);
+        setSeaViewOpen(false);
+      }
       try {
         // Fetched together on purpose: the verdict and the evidence panel must
         // be reading the same numbers, or the card and the panel could disagree
         // on screen, which would be worse than either being slightly stale.
         const [pointForecast, verdict] = await Promise.all([
-          api.forecastPoint(lat, lon),
+          api.forecastPoint(lat, lon, requestedSurface !== 'land'),
           api.assessRisk(lat, lon, loa),
         ]);
+        if (queryEpoch !== pointQueryEpoch.current) return;
+        const surface = resolvedSurface(requestedSurface, pointForecast);
+        setSelection((current) =>
+          current && current.lon === lon && current.lat === lat
+            ? { ...current, surface }
+            : current,
+        );
         setForecast(pointForecast);
         setRisk(verdict);
-        void api
-          .geofenceCheck(lat, lon, heading ?? undefined, heading === null ? undefined : speed, geofence?.states ?? {})
-          .then(setGeofence)
-          .catch(() => setGeofence(null));
+        if (surface === 'land') {
+          setGeofence(null);
+          setRouteDestination(null);
+          setRoutePlan(null);
+          setPickingDestination(false);
+          setSeaViewOpen(false);
+        } else {
+          void api
+            .geofenceCheck(
+              lat,
+              lon,
+              heading ?? undefined,
+              heading === null ? undefined : speed,
+              geofence?.states ?? {},
+            )
+            .then((next) => {
+              if (queryEpoch === pointQueryEpoch.current) setGeofence(next);
+            })
+            .catch(() => {
+              if (queryEpoch === pointQueryEpoch.current) setGeofence(null);
+            });
+        }
         void api.freshness().then(setFreshness).catch(() => undefined);
       } catch (cause) {
+        if (queryEpoch !== pointQueryEpoch.current) return;
         const message =
           cause instanceof ApiError
             ? cause.status === 0
@@ -323,33 +384,23 @@ export default function App() {
         setForecast(null);
         setRisk(null);
       } finally {
-        setLoading(false);
+        if (queryEpoch === pointQueryEpoch.current) setLoading(false);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [loaM, heading, speed],
   );
 
-  const rejectLandPoint = useCallback(
-    (lon: number, lat: number, surface: MapSurface, purpose: 'analysis' | 'destination') => {
+  const rejectLandDestination = useCallback(
+    (lon: number, lat: number, surface: MapSurface) => {
       if (surface !== 'land') return false;
-      if (purpose === 'analysis') {
-        setSelection(null);
-        setForecast(null);
-        setRisk(null);
-        setGeofence(null);
-        setSeaViewOpen(false);
-      } else {
-        setPickingDestination(false);
-        setRouteDestination(null);
-        setRoutePlan(null);
-      }
+      setPickingDestination(false);
+      setRouteDestination(null);
+      setRoutePlan(null);
       setLoading(false);
       setError(
         `${lat.toFixed(3)}°N ${lon.toFixed(3)}°E is on land. ` +
-          (purpose === 'destination'
-            ? 'A marine route destination must be placed on water.'
-            : 'ORCA did not run a sea forecast or EEZ warning; choose a point on the water.'),
+          'A marine route destination must be placed on water.',
       );
       return true;
     },
@@ -359,14 +410,16 @@ export default function App() {
   // Re-run when the vessel changes: the same sea is a different verdict for a
   // canoe and a trawler, and that is the point worth demonstrating.
   useEffect(() => {
-    if (selection) void query(selection.lon, selection.lat, selection.label, loaM);
+    if (selection) {
+      void query(selection.lon, selection.lat, selection.label, loaM, selection.surface);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaM]);
 
   // A new heading changes time-to-cross but nothing else, so re-check the
   // boundaries without re-fetching the forecast.
   useEffect(() => {
-    if (!selection) return;
+    if (!selection || selection.surface !== 'water') return;
     void api
       .geofenceCheck(
         selection.lat,
@@ -615,7 +668,7 @@ export default function App() {
           stroked: true,
           pickable: true,
           onClick: ({ object }) => {
-            if (object) void query(object.lon, object.lat, object.label);
+            if (object) void query(object.lon, object.lat, object.label, loaM, 'water');
           },
         }),
       );
@@ -735,7 +788,7 @@ export default function App() {
             stroked: true,
             pickable: true,
             onClick: ({ object }) => {
-              if (object) void query(object.lon, object.lat);
+              if (object) void query(object.lon, object.lat, undefined, loaM, 'water');
             },
           }),
         );
@@ -845,6 +898,7 @@ export default function App() {
     () => thresholds?.classes.find((c) => loaM >= c.loa_range_m[0] && loaM < c.loa_range_m[1]),
     [thresholds, loaM],
   );
+  const isLandSelection = selection?.surface === 'land';
 
   return (
     <div className="bg-abyss-0 flex h-full flex-col">
@@ -885,15 +939,14 @@ export default function App() {
             // NOT move the selection: re-running the point forecast would throw
             // away the origin the user is planning from.
             if (pickingDestination) {
-              if (rejectLandPoint(lon, lat, surface, 'destination')) return;
+              if (rejectLandDestination(lon, lat, surface)) return;
               setError(null);
               setRouteDestination({ lat, lon });
               setPickingDestination(false);
               setRoutePlan(null);
               return;
             }
-            if (rejectLandPoint(lon, lat, surface, 'analysis')) return;
-            void query(lon, lat);
+            void query(lon, lat, undefined, loaM, surface);
           }}
             className="absolute inset-0"
           />
@@ -929,7 +982,7 @@ export default function App() {
                     type="button"
                     onClick={() => {
                       mapRef.current?.flyTo(place.lon, place.lat, 8);
-                      void query(place.lon, place.lat, place.label);
+                      void query(place.lon, place.lat, place.label, loaM, 'water');
                     }}
                     className={clsx(
                       'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors',
@@ -982,12 +1035,16 @@ export default function App() {
 
           <div className="pointer-events-auto">
             <BoundaryPanel
-              check={geofence}
+              check={isLandSelection ? null : geofence}
               heading={heading}
               speed={speed}
               onHeading={setHeading}
               onSpeed={setSpeed}
-              capUrl={selection ? api.capUrl(selection.lat, selection.lon, loaM, 'ta') : null}
+              capUrl={
+                selection && !isLandSelection
+                  ? api.capUrl(selection.lat, selection.lon, loaM, 'ta')
+                  : null
+              }
               visible={showFences}
               onToggleVisible={() => setShowFences((v) => !v)}
             />
@@ -1063,7 +1120,7 @@ export default function App() {
         )}
 
         {/* ------- bottom centre: passage planning, then the sea view ------- */}
-        {selection && (
+        {selection && !isLandSelection && (
           <div className="pointer-events-none absolute bottom-3 left-[41rem] z-20 w-[22rem]">
             <RoutePanel
               origin={selection}
@@ -1081,7 +1138,7 @@ export default function App() {
         {/* ------- the forecast as the sea it describes -------
             Anchored bottom-left of the map area so it grows upward and never
             covers the verdict card, which stays the authority on the page. */}
-        {selection && (
+        {selection && !isLandSelection && (
           <div className="pointer-events-none absolute right-[25.5rem] bottom-3 z-20 flex flex-col items-end">
             <SeaStatePanel
               forecast={forecast}
@@ -1121,7 +1178,7 @@ export default function App() {
                 onOpen={alerts.markAllSeen}
                 onAcknowledge={(id) => void alerts.acknowledge(id)}
                 onCheckNow={alerts.checkNow}
-                canWatch={Boolean(selection)}
+                canWatch={Boolean(selection && !isLandSelection)}
                 watching={Boolean(watchId)}
                 onWatchToggle={() => {
                   if (watchId) {
@@ -1129,7 +1186,7 @@ export default function App() {
                     setWatchId(null);
                     return;
                   }
-                  if (!selection) return;
+                  if (!selection || isLandSelection) return;
                   void alerts
                     .watch({
                       lat: selection.lat,
@@ -1198,7 +1255,7 @@ export default function App() {
             )}
             <div className={clsx('absolute left-0', intelOpen ? 'top-12' : 'top-0')}>
               <OperationalIntelPanel
-                point={selection}
+                point={isLandSelection ? null : selection}
                 open={intelOpen}
                 onToggle={(open) => {
                   setIntelOpen(open);
@@ -1226,7 +1283,7 @@ export default function App() {
             )}
             <div className={clsx('absolute left-0', sarOpen ? 'top-12' : 'top-0')}>
               <SarPanel
-                origin={selection}
+                origin={isLandSelection ? null : selection}
                 hours={sarHours}
                 onHours={setSarHours}
                 objectClass={sarClass}
@@ -1286,6 +1343,7 @@ export default function App() {
                 <VerdictCard
                   result={risk}
                   geofence={geofence}
+                  landPoint={isLandSelection}
                   onCollapse={() => setVerdictPanelOpen(false)}
                 />
               </div>
@@ -1327,7 +1385,7 @@ export default function App() {
                     <ChevronRight className="h-4 w-4" aria-hidden />
                   </button>
                 </div>
-                <EvidencePanel forecast={forecast} />
+                <EvidencePanel forecast={forecast} landPoint={isLandSelection} />
               </div>
             ) : (
               <button

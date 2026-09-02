@@ -16,6 +16,9 @@ function applicationErrors(errors: string[]) {
 test('operational panel calls and renders every new browser endpoint', async ({ page }) => {
   await page.setViewportSize({ width: 1093, height: 879 });
   const requested = new Set<string>();
+  let geofenceRequests = 0;
+  let forecastRequests = 0;
+  let riskRequests = 0;
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.stack ?? error.message));
   await page.addInitScript(() => sessionStorage.setItem('orca.intro.seen', '1'));
@@ -43,8 +46,50 @@ test('operational panel calls and renders every new browser endpoint', async ({ 
       case '/api/sar/classes':
         return json(route, { classes: [], current_field_error_ms: 0.15, note: 'test' });
       case '/api/forecast/point':
+        forecastRequests += 1;
+        if (forecastRequests > 1) {
+          return json(route, {
+            lat: 22.5,
+            lon: 78.5,
+            place: null,
+            generated_at: now,
+            evidence: {
+              wind_speed: {
+                dataset_id: 'open_meteo.forecast', provider: 'open_meteo', variable: 'wind_speed',
+                value: 6.1, unit: 'kn', provenance: 'live',
+                freshness: { valid_time: now, retrieved_at: now, age_hours: 0, is_stale: false, stale_after: now, note: null },
+                lineage: [], url: null, location: [78.5, 22.5], method: null, uncertainty: null,
+                citations: [], notes: null,
+              },
+              visibility: {
+                dataset_id: 'open_meteo.forecast', provider: 'open_meteo', variable: 'visibility',
+                value: 4.42, unit: 'km', provenance: 'live',
+                freshness: { valid_time: now, retrieved_at: now, age_hours: 0, is_stale: false, stale_after: now, note: null },
+                lineage: [], url: null, location: [78.5, 22.5], method: null, uncertainty: null,
+                citations: [], notes: null,
+              },
+            },
+            summary: { count: 2, provenance: 'live', mix: ['live'], stale: false, max_age_hours: 0 },
+          });
+        }
         return json(route, { lat: 13.1, lon: 80.4, place: null, generated_at: now, evidence: {}, summary: { count: 0, provenance: null, mix: [], stale: false, max_age_hours: null } });
       case '/api/risk/assess':
+        riskRequests += 1;
+        if (riskRequests > 1) {
+          return json(route, {
+            verdict: 'UNVERIFIABLE', verdict_source: 'rule_engine', index: 0, vetoes: [],
+            components: [
+              { name: 'wave', value: null, unit: 'm', limit: 1.5, score: 0, weight: 0.35, contribution: 0, formula: 'missing', exceeded: false },
+              { name: 'wind', value: 6.1, unit: 'kn', limit: 22, score: 95, weight: 0.3, contribution: 28.5, formula: 'test', exceeded: false },
+              { name: 'visibility', value: 4.42, unit: 'km', limit: 2, score: 80, weight: 0.15, contribution: 12, formula: 'test', exceeded: false },
+              { name: 'lightning', value: 0, unit: '%', limit: 60, score: 100, weight: 0.2, contribution: 20, formula: 'test', exceeded: false },
+            ],
+            boat_class_code: 'IND-MOTOR-S', boat_class_label: 'test boat', loa_m: 8.2,
+            confidence: 'low', escalate: true, escalation_message: 'wave unavailable', data_age_hours: 0,
+            thresholds_version: 'test', evaluated_at: now, evidence: [], citations: [],
+            what_would_change_it: [], disclaimer: 'test',
+          });
+        }
         return json(route, {
           verdict: 'GO', verdict_source: 'rule_engine', index: 82, vetoes: [], components: [
             { name: 'wave', value: 1.2, unit: 'm', limit: 1.5, score: 82, weight: 0.35, contribution: 28.7, formula: 'test', exceeded: false },
@@ -63,6 +108,7 @@ test('operational panel calls and renders every new browser endpoint', async ({ 
           what_would_change_it: ['old future-facing suggestion'], disclaimer: 'test only',
         });
       case '/api/geofence/check':
+        geofenceRequests += 1;
         return json(route, {
           position: { lat: 13.1, lon: 80.4 }, heading_deg: null, speed_kn: null,
           generated_at: now, fences_in_range: 1, proximities: [{
@@ -223,5 +269,33 @@ test('operational panel calls and renders every new browser endpoint', async ({ 
     '/api/traffic/fishing-effort', '/api/catalog/nasa', '/api/catalog/sentinel',
     '/api/imagery/sentinel/preview', '/api/imagery/nasa/preview',
   ]));
+
+  await page.getByRole('button', { name: 'Close marine intelligence' }).click();
+  await page.getByRole('button', { name: 'Close Ask ORCA chat' }).click();
+  const geofenceRequestsBeforeLand = geofenceRequests;
+  await page.evaluate(async () => {
+    const map = (window as unknown as {
+      __orcaMap: {
+        jumpTo: (options: { center: [number, number]; zoom: number }) => void;
+        areTilesLoaded: () => boolean;
+        once: (event: string, callback: () => void) => void;
+      };
+    }).__orcaMap;
+    map.jumpTo({ center: [78.5, 22.5], zoom: 7 });
+    if (!map.areTilesLoaded()) {
+      await new Promise<void>((resolve) => map.once('idle', resolve));
+    }
+  });
+  const mapBox = await page.locator('.maplibregl-map').boundingBox();
+  expect(mapBox).not.toBeNull();
+  await page.mouse.click(mapBox!.x + mapBox!.width / 2, mapBox!.y + mapBox!.height / 2);
+  await expect(page.getByText('LAND POINT')).toBeVisible();
+  await expect(page.getByText('Atmospheric analysis')).toBeVisible();
+  await expect(page.getByText('Land observation')).toBeVisible();
+  await expect(page.getByText('Wind speed').first()).toBeVisible();
+  await expect(page.getByText(/maritime EEZ status are intentionally omitted/)).toBeVisible();
+  await expect(page.getByText('Significant wave height')).toHaveCount(0);
+  await expect(page.getByText(/Outside India's EEZ/)).toHaveCount(0);
+  expect(geofenceRequests).toBe(geofenceRequestsBeforeLand);
   expect(applicationErrors(pageErrors)).toEqual([]);
 });

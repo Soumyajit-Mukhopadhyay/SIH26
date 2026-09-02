@@ -13,7 +13,7 @@
  *   identical to a reader and mean opposite things.
  */
 
-import { ExternalLink, GitBranch, Scale } from 'lucide-react';
+import { ExternalLink, GitBranch, MapPin, Scale } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { PointForecast } from '@/lib/types';
 import { EvidenceValue, ProvenanceMix } from './ProvenanceBadge';
@@ -57,6 +57,18 @@ const LABELS: Record<string, string> = {
   sea_surface_current_direction: 'Current direction',
 };
 
+const MARINE_ONLY = new Set([
+  'wave_height',
+  'wave_period',
+  'swell_height',
+  'wave_direction',
+  'sst',
+  'sst_satellite',
+  'sst_uncertainty',
+  'sea_surface_current',
+  'sea_surface_current_direction',
+]);
+
 function Agreement({ forecast }: { forecast: PointForecast }) {
   const model = forecast.evidence.sst;
   const satellite = forecast.evidence.sst_satellite;
@@ -91,7 +103,13 @@ function Agreement({ forecast }: { forecast: PointForecast }) {
   );
 }
 
-export function EvidencePanel({ forecast }: { forecast: PointForecast | null }) {
+export function EvidencePanel({
+  forecast,
+  landPoint = false,
+}: {
+  forecast: PointForecast | null;
+  landPoint?: boolean;
+}) {
   if (!forecast) {
     return (
       <div className="text-ink-2 p-4 text-xs leading-snug">
@@ -100,11 +118,13 @@ export function EvidencePanel({ forecast }: { forecast: PointForecast | null }) 
     );
   }
 
-  const entries = Object.entries(forecast.evidence).sort(([a], [b]) => {
-    const ia = ORDER.indexOf(a);
-    const ib = ORDER.indexOf(b);
-    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-  });
+  const entries = Object.entries(forecast.evidence)
+    .filter(([variable]) => !landPoint || !MARINE_ONLY.has(variable))
+    .sort(([a], [b]) => {
+      const ia = ORDER.indexOf(a);
+      const ib = ORDER.indexOf(b);
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+    });
 
   const derived = entries.filter(([, e]) => e.lineage.length > 0);
 
@@ -121,7 +141,20 @@ export function EvidencePanel({ forecast }: { forecast: PointForecast | null }) 
         />
       </div>
 
-      <Agreement forecast={forecast} />
+      {landPoint && (
+        <div className="border-cyan/25 bg-cyan/8 rounded border px-3 py-2">
+          <div className="label text-cyan mb-1 flex items-center gap-1">
+            <MapPin className="h-3 w-3" aria-hidden />
+            Land observation
+          </div>
+          <p className="text-ink-1 text-xs leading-snug">
+            Showing atmospheric data for this position. Waves, sea temperature, currents, PFZ and
+            maritime EEZ status are intentionally omitted.
+          </p>
+        </div>
+      )}
+
+      {!landPoint && <Agreement forecast={forecast} />}
 
       <div className="grid grid-cols-2 gap-x-3 gap-y-3">
         {entries.map(([key, evidence]) => (
