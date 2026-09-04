@@ -32,12 +32,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from orca.provenance import DECISION_GRADE, Citation, Evidence, Provenance, utcnow
 from orca.services.thresholds import (
-    CAPE_VETO_J_KG,
+    CAPE_BAND_ELEVATED_MAX,
+    CAPE_BAND_HIGH_MAX,
+    CAPE_BAND_LOW_MAX,
+    CAPE_BAND_MODERATE_MAX,
     CONFIDENCE_AGE_LIMIT_H,
-    LIGHTNING_VETO_PCT,
     THRESHOLDS_VERSION,
     BoatClass,
-    classify,
+    resolve_vessel,
 )
 
 log = logging.getLogger(__name__)
@@ -90,6 +92,8 @@ class Component(BaseModel):
     contribution: float
     formula: str
     exceeded: bool
+    #: Qualitative CAPE band when ``name == "lightning"`` and CAPE was assessed.
+    band: str | None = None
     provenance: Provenance | None = None
     age_hours: float | None = None
 
@@ -107,7 +111,7 @@ class RiskResult(BaseModel):
     components: list[Component]
     boat_class_code: str
     boat_class_label: str
-    loa_m: float
+    loa_m: float | None = None
     confidence: Literal["high", "low"]
     escalate: bool
     escalation_message: str | None = None
@@ -122,6 +126,11 @@ class RiskResult(BaseModel):
     disclaimer: str = (
         "ORCA supplements, never replaces, official IMD and INCOIS bulletins."
     )
+    #: How the vessel was identified: category | loa | unknown
+    vessel_source: Literal["category", "loa", "unknown"] | None = None
+    #: Phase 3 — parallel environmental models (ORCA_LEGACY + optional BSI).
+    #: Never collapse these into one weighted number.
+    environmental_models: list[dict] = Field(default_factory=list)
 
     @property
     def is_safe(self) -> bool:
@@ -148,25 +157,135 @@ def _score_visibility(visibility_km: float) -> tuple[float, str]:
     return score, f"min(100, {visibility_km} / 10 x 100) = {score:.1f}"
 
 
-def _score_lightning(lightning_pct: float) -> tuple[float, str]:
+CapeBand = Literal["LOW", "MODERATE", "ELEVATED", "HIGH", "VERY_HIGH"]
+
+#: Graded ORCA_LEGACY contribution from CAPE instability bands. Softer than
+#: wave/wind: CAPE never alone forces a hard veto.
+_CAPE_BAND_SCORES: dict[CapeBand, float] = {
+    "LOW": 100.0,
+    "MODERATE": 75.0,
+    "ELEVATED": 55.0,
+    "HIGH": 35.0,
+    "VERY_HIGH": 15.0,
+}
+
+
+def classify_cape(cape_j_kg: float) -> CapeBand:
+    """Map CAPE (J/kg) to a qualitative atmospheric-instability band.
+
+    Bands are ORCA product labels informed by conventional instability language
+    (including NOAA-style moderate ~1000–2500 / strong >2500). They are **not**
+    lightning probability, detected strikes, or official marine limits.
+    """
+    if cape_j_kg < CAPE_BAND_LOW_MAX:
+        return "LOW"
+    if cape_j_kg < CAPE_BAND_MODERATE_MAX:
+        return "MODERATE"
+    if cape_j_kg < CAPE_BAND_ELEVATED_MAX:
+        return "ELEVATED"
+    if cape_j_kg <= CAPE_BAND_HIGH_MAX:
+        return "HIGH"
+    return "VERY_HIGH"
+
+
+def _score_cape(band: CapeBand) -> tuple[float, str]:
+    score = _CAPE_BAND_SCORES[band]
+    return score, f"CAPE band {band} → score {score:.0f}/100 (instability indicator, not a veto)"
+
+
+def _score_lightning_legacy_pct(lightning_pct: float) -> tuple[float, str]:
+    """Legacy soft score when callers supply a percentage without CAPE.
+
+    Retained for older tests/fixtures. Does **not** create a hard veto.
+    """
     score = max(0.0, 100 - lightning_pct)
-    return score, f"max(0, 100 - {lightning_pct}) = {score:.1f}"
+    return score, f"max(0, 100 - {lightning_pct}) = {score:.1f} (legacy pct; no CAPE veto)"
 
 
 def cape_to_lightning_pct(cape_j_kg: float) -> float:
-    """Map CAPE onto a lightning-probability-like percentage.
+    """Deprecated compatibility shim.
 
-    Needed because Open-Meteo has no lightning field and no free authoritative
-    lightning source covers India (GOES/GLM does not reach it). The mapping is
-    piecewise-linear against the conventional NOAA instability bands and is
-    labelled as a proxy everywhere it surfaces — we do not claim detection.
+    Historically mapped CAPE onto a 0–100 "convective-risk proxy" used for a
+    hard veto at 60%. Prefer :func:`classify_cape`. This function no longer
+    drives any veto path.
     """
-    if cape_j_kg <= 300:
-        return 0.0
-    if cape_j_kg >= CAPE_VETO_J_KG:
-        return 100.0
-    # 300 J/kg -> 0%, 2500 J/kg -> 100%
-    return round((cape_j_kg - 300) / (CAPE_VETO_J_KG - 300) * 100, 1)
+    band = classify_cape(cape_j_kg)
+    # Invert band scores so callers expecting a rising "risk %" still get a
+    # monotonic signal; 0 ≈ calm, 100 ≈ very high instability.
+    return round(100.0 - _CAPE_BAND_SCORES[band], 1)
+
+
+def unknown_vessel_result(
+    *,
+    evidence: list[Evidence] | None = None,
+    data_age_hours: float = 0.0,
+    loa_m: float | None = None,
+) -> RiskResult:
+    """Honest refusal when neither category nor LOA was supplied.
+
+    Must not invent IND-MOT-S / 8.2 m. Environmental Evidence may still be
+    attached so the UI can show conditions without a vessel-specific verdict.
+    """
+    evidence = evidence or []
+    return RiskResult(
+        verdict="UNVERIFIABLE",
+        index=0.0,
+        vetoes=[],
+        components=[],
+        boat_class_code="UNKNOWN",
+        boat_class_label="Vessel type not specified",
+        loa_m=loa_m,
+        confidence="low",
+        escalate=True,
+        escalation_message=(
+            "ORCA cannot issue a vessel-specific safety verdict without knowing the boat type. "
+            "Select a vessel category (or optionally enter length overall), then ask again."
+        ),
+        data_age_hours=round(data_age_hours, 2),
+        evaluated_at=utcnow().isoformat(),
+        evidence=evidence,
+        citations=[],
+        what_would_change_it=[
+            "select a vessel category that matches your boat, or enter an approximate length overall"
+        ],
+        vessel_source="unknown",
+    )
+
+
+def _attach_environmental_models(
+    result: RiskResult,
+    *,
+    wave_m: float | None,
+    period_s: float | None = None,
+    directional_spread: float | None = None,
+    hsea_initial_m: float | None = None,
+    hsea_final_m: float | None = None,
+    beam_m: float | None = None,
+) -> RiskResult:
+    """Attach ORCA_LEGACY + INCOIS_SVAS_BSI without changing the legacy verdict."""
+    from orca.services.environmental_assessment import (
+        bsi_assessment_from_inputs,
+        build_environmental_assessments,
+        legacy_assessment,
+    )
+
+    legacy = legacy_assessment(
+        index=result.index,
+        verdict=result.verdict,
+        components=[c.model_dump(mode="json") for c in result.components],
+        thresholds_version=result.thresholds_version,
+        vetoes=list(result.vetoes),
+    )
+    bsi = bsi_assessment_from_inputs(
+        hs_m=wave_m,
+        period_s=period_s,
+        directional_spread=directional_spread,
+        hsea_initial_m=hsea_initial_m,
+        hsea_final_m=hsea_final_m,
+        beam_m=beam_m,
+    )
+    models = build_environmental_assessments(legacy=legacy, bsi=bsi)
+    return result.model_copy(update={"environmental_models": models})
 
 
 def assess(
@@ -176,26 +295,62 @@ def assess(
     visibility_km: float | None,
     lightning_pct: float | None = None,
     cape_j_kg: float | None = None,
-    loa_m: float = 8.2,
+    loa_m: float | None = None,
     boat_class: BoatClass | None = None,
+    boat_class_code: str | None = None,
     data_age_hours: float = 0.0,
     evidence: list[Evidence] | None = None,
+    wave_period_s: float | None = None,
+    directional_spread: float | None = None,
+    hsea_initial_m: float | None = None,
+    hsea_final_m: float | None = None,
+    beam_m: float | None = None,
 ) -> RiskResult:
     """Deterministic GO / CAUTION / NO-GO. Pure function. No I/O, no LLM.
 
-    ``lightning_pct`` wins if supplied; otherwise it is derived from ``cape_j_kg``
-    via :func:`cape_to_lightning_pct`, because CAPE is what we can actually get
-    for India.
+    Vessel resolution (Phase 1): explicit ``boat_class`` / ``boat_class_code``
+    wins; else ``loa_m`` via :func:`classify`; else UNKNOWN → UNVERIFIABLE.
+    There is no silent 8.2 m / IND-MOT-S default.
+
+    CAPE (``cape_j_kg``) is preferred for the convective component: it is scored
+    as a qualitative instability band and never alone produces a hard veto.
+    ``lightning_pct`` remains a legacy soft-score input when CAPE is absent.
 
     A missing input does not silently score zero. It scores zero *and* forces low
     confidence, because "we could not measure the waves" and "the waves are
     calm" must never produce the same answer.
     """
-    boat = boat_class or classify(loa_m)
     evidence = evidence or []
+    vessel_source: Literal["category", "loa", "unknown"] = "unknown"
 
-    if lightning_pct is None and cape_j_kg is not None:
-        lightning_pct = cape_to_lightning_pct(cape_j_kg)
+    if boat_class is not None:
+        boat = boat_class
+        vessel_source = "category"
+    else:
+        resolved = resolve_vessel(boat_class_code=boat_class_code, loa_m=loa_m)
+        if resolved.error or resolved.boat is None:
+            # Vessel-specific ORCA verdict is UNVERIFIABLE, but the environmental
+            # BSI hazard indicator (without beam) may still be computed.
+            unknown = unknown_vessel_result(
+                evidence=evidence, data_age_hours=data_age_hours, loa_m=loa_m
+            )
+            return _attach_environmental_models(
+                unknown,
+                wave_m=wave_m,
+                period_s=wave_period_s,
+                directional_spread=directional_spread,
+                hsea_initial_m=hsea_initial_m,
+                hsea_final_m=hsea_final_m,
+                beam_m=beam_m,
+            )
+        boat = resolved.boat
+        vessel_source = resolved.source  # type: ignore[assignment]
+        if resolved.loa_m is not None:
+            loa_m = resolved.loa_m
+
+    cape_band: CapeBand | None = None
+    if cape_j_kg is not None:
+        cape_band = classify_cape(cape_j_kg)
 
     missing: list[str] = []
     if wave_m is None:
@@ -204,8 +359,8 @@ def assess(
         missing.append("wind speed")
     if visibility_km is None:
         missing.append("visibility")
-    if lightning_pct is None:
-        missing.append("lightning probability / convective energy")
+    if cape_j_kg is None and lightning_pct is None:
+        missing.append("convective energy (CAPE)")
 
     # Absent inputs score 0 (the cautious direction) and are marked as absent so
     # the UI can distinguish "dangerous" from "unknown".
@@ -218,9 +373,12 @@ def assess(
     vis_score, vis_formula = (
         _score_visibility(visibility_km) if visibility_km is not None else (0.0, "no data")
     )
-    light_score, light_formula = (
-        _score_lightning(lightning_pct) if lightning_pct is not None else (0.0, "no data")
-    )
+    if cape_band is not None:
+        light_score, light_formula = _score_cape(cape_band)
+    elif lightning_pct is not None:
+        light_score, light_formula = _score_lightning_legacy_pct(lightning_pct)
+    else:
+        light_score, light_formula = 0.0, "no data"
 
     index = round(
         WEIGHTS["wave"] * wave_score
@@ -230,30 +388,45 @@ def assess(
         1,
     )
 
+    vessel_phrase = (
+        f"{_num(loa_m)} m boat ({boat.label})" if loa_m is not None else f"{boat.label}"
+    )
+
     # ---- hard vetoes override the blended score entirely ----
+    # Wave / wind / visibility only. CAPE is graded into the index; it is not a
+    # marine hard limit and must not alone force NO-GO.
     vetoes: list[str] = []
     if wave_m is not None and wave_m >= boat.max_wave_m:
         vetoes.append(
             f"Hs {_num(wave_m)} m is at or over the {_num(boat.max_wave_m)} m limit for your "
-            f"{_num(loa_m)} m boat ({boat.label})"
+            f"{vessel_phrase}"
         )
     if wind_kn is not None and wind_kn >= boat.max_wind_kn:
         vetoes.append(
             f"wind {_num(wind_kn)} kn is at or over the {_num(boat.max_wind_kn)} kn limit "
-            f"for your {_num(loa_m)} m boat"
+            f"for your {vessel_phrase}"
         )
     if visibility_km is not None and visibility_km < boat.min_visibility_km:
         vetoes.append(
             f"visibility {_num(visibility_km)} km is below the "
             f"{_num(boat.min_visibility_km)} km minimum for safe navigation in this class"
         )
-    if lightning_pct is not None and lightning_pct >= LIGHTNING_VETO_PCT:
-        # One decimal, matching how the value is measured: rounding 72.7 to 73
-        # here made the critic's figure check disagree with a correct draft.
-        vetoes.append(
-            f"high CAPE-derived convective-risk proxy ({_num(round(lightning_pct, 1))}%; "
-            "this is not lightning detection or an official alert)"
-        )
+
+    if cape_j_kg is not None and cape_band is not None:
+        convective_value: float | None = cape_j_kg
+        convective_unit = "J/kg"
+        convective_limit = 0.0
+        convective_exceeded = False
+    elif lightning_pct is not None:
+        convective_value = lightning_pct
+        convective_unit = "%"
+        convective_limit = 0.0
+        convective_exceeded = False
+    else:
+        convective_value = None
+        convective_unit = "J/kg"
+        convective_limit = 0.0
+        convective_exceeded = False
 
     components = [
         Component(
@@ -291,14 +464,15 @@ def assess(
         ),
         Component(
             name="lightning",
-            value=lightning_pct,
-            unit="%",
-            limit=LIGHTNING_VETO_PCT,
+            value=convective_value,
+            unit=convective_unit,
+            limit=convective_limit,
             score=round(light_score, 1),
             weight=WEIGHTS["lightning"],
             contribution=round(WEIGHTS["lightning"] * light_score, 1),
             formula=light_formula,
-            exceeded=lightning_pct is not None and lightning_pct >= LIGHTNING_VETO_PCT,
+            exceeded=convective_exceeded,
+            band=cape_band,
         ),
     ]
 
@@ -348,24 +522,33 @@ def assess(
             + ". Confirm with your fisheries office or the coastal VHF channel before sailing."
         )
 
-    return RiskResult(
-        verdict=verdict,
-        index=index,
-        vetoes=vetoes,
-        components=components,
-        boat_class_code=boat.code,
-        boat_class_label=boat.label,
-        loa_m=loa_m,
-        confidence=confidence,
-        escalate=escalate,
-        escalation_message=escalation_message,
-        data_age_hours=round(data_age_hours, 2),
-        evaluated_at=utcnow().isoformat(),
-        evidence=evidence,
-        citations=list(boat.citations),
-        what_would_change_it=_what_would_change_it(
-            verdict, components, boat, wave_m, wind_kn, index
+    return _attach_environmental_models(
+        RiskResult(
+            verdict=verdict,
+            index=index,
+            vetoes=vetoes,
+            components=components,
+            boat_class_code=boat.code,
+            boat_class_label=boat.label,
+            loa_m=loa_m,
+            confidence=confidence,
+            escalate=escalate,
+            escalation_message=escalation_message,
+            data_age_hours=round(data_age_hours, 2),
+            evaluated_at=utcnow().isoformat(),
+            evidence=evidence,
+            citations=list(boat.citations),
+            what_would_change_it=_what_would_change_it(
+                verdict, components, boat, wave_m, wind_kn, index
+            ),
+            vessel_source=vessel_source,
         ),
+        wave_m=wave_m,
+        period_s=wave_period_s,
+        directional_spread=directional_spread,
+        hsea_initial_m=hsea_initial_m,
+        hsea_final_m=hsea_final_m,
+        beam_m=beam_m,
     )
 
 
@@ -419,13 +602,23 @@ def _what_would_change_it(
 def assess_from_evidence(
     evidence: dict[str, Evidence],
     *,
-    loa_m: float = 8.2,
+    loa_m: float | None = None,
     boat_class: BoatClass | None = None,
+    boat_class_code: str | None = None,
+    directional_spread: float | None = None,
+    hsea_initial_m: float | None = None,
+    hsea_final_m: float | None = None,
+    beam_m: float | None = None,
 ) -> RiskResult:
     """Convenience wrapper: pull the engine's inputs out of an Evidence mapping.
 
+    Vessel precedence: ``boat_class`` / ``boat_class_code`` → ``loa_m`` → UNKNOWN.
     Keeps unit handling in one place. The engine itself stays a pure function of
     plain numbers so it is trivially testable and has no provenance dependency.
+
+    BSI inputs: wave period is taken from evidence when present. Directional
+    spread and 6 h wind-sea pair must be supplied explicitly — they are not
+    invented from unrelated variables.
     """
 
     def value(name: str) -> float | None:
@@ -445,6 +638,12 @@ def assess_from_evidence(
         if e.value is not None and e.freshness.age_hours != float("inf")
     ]
 
+    # Prefer an explicitly supplied 6 h wind-sea pair; otherwise leave None so
+    # rapid-development stays UNAVAILABLE rather than substituting total Hs.
+    if hsea_initial_m is None and hsea_final_m is None:
+        # A single current wind_wave_height cannot form Z6h alone.
+        pass
+
     return assess(
         wave_m=value("wave_height"),
         wind_kn=value("wind_speed"),
@@ -452,6 +651,13 @@ def assess_from_evidence(
         cape_j_kg=value("convective_energy"),
         loa_m=loa_m,
         boat_class=boat_class,
+        boat_class_code=boat_class_code,
         data_age_hours=max(ages) if ages else 0.0,
         evidence=list(evidence.values()),
+        wave_period_s=value("wave_period"),
+        directional_spread=directional_spread,
+        hsea_initial_m=hsea_initial_m,
+        hsea_final_m=hsea_final_m,
+        beam_m=beam_m,
     )
+

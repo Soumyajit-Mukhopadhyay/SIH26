@@ -31,6 +31,7 @@ import {
   ListChecks,
   Loader2,
   MessageSquare,
+  Search,
   Split,
   Square,
   Wrench,
@@ -43,12 +44,74 @@ import { VoiceBar, type VoiceOption } from '@/components/VoiceBar';
 import { useSpeaker } from '@/hooks/useVoice';
 import { inline, stripBullet } from '@/lib/markdown';
 
+/**
+ * Prototype UX flag: keep the full agent-trace implementation, but do not show
+ * it in the chat panel. Flip to `true` to restore the detailed timeline.
+ */
+const SHOW_AGENT_TRACE = false;
+
+const WORKING_MESSAGES = [
+  'Searching coastal data…',
+  'Working on your question…',
+  'Checking conditions…',
+  'Gathering verified evidence…',
+];
+
 const SUGGESTIONS = [
   'Is it safe to go out tomorrow morning?',
   'Where is the water warmest near here?',
   'What are the wave limits for my boat, and who says so?',
   'Where does your data actually come from?',
 ];
+
+function WorkingMotion() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setIndex((current) => (current + 1) % WORKING_MESSAGES.length);
+    }, 2200);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return (
+    <div
+      className="border-hairline bg-abyss-0/40 mb-3 overflow-hidden rounded border px-3 py-4"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="flex items-center gap-3">
+        <div className="relative flex h-9 w-9 shrink-0 items-center justify-center">
+          <span className="border-cyan/30 absolute inset-0 rounded-full border" />
+          <span className="border-cyan absolute inset-0 animate-ping rounded-full border opacity-40" />
+          <Search className="text-cyan h-3.5 w-3.5 animate-pulse" aria-hidden />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="label text-cyan mb-1">ORCA is working</div>
+          <p
+            key={index}
+            className="text-ink-1 text-xs leading-snug"
+            style={{ animation: 'orca-rise 280ms var(--ease-out-instrument)' }}
+          >
+            {WORKING_MESSAGES[index]}
+          </p>
+          <div className="mt-2.5 flex gap-1">
+            {[0, 1, 2].map((dot) => (
+              <span
+                key={dot}
+                className="bg-cyan/70 h-1 w-1 rounded-full"
+                style={{
+                  animation: 'orca-pulse 1.2s ease-in-out infinite',
+                  animationDelay: `${dot * 0.2}s`,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StepIcon({ status }: { status: PlanStep['status'] }) {
   if (status === 'running') return <Loader2 className="text-cyan h-3 w-3 animate-spin" aria-hidden />;
@@ -334,11 +397,6 @@ export function ChatPanel({
               stop
             </button>
           )}
-          {!run.running && run.final?.llm_provider && (
-            <span className="data text-ink-3 max-w-40 truncate text-2xs">
-              answered by {run.final.llm_provider}
-            </span>
-          )}
           <button
             type="button"
             onClick={onClose}
@@ -352,12 +410,11 @@ export function ChatPanel({
       </div>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {run.events.length === 0 && !run.final && (
+        {run.events.length === 0 && !run.final && !run.running && (
           <div className="space-y-3">
             <p className="text-ink-2 text-xs leading-relaxed">
-              Ask in plain language. ORCA will publish a plan, choose its own tools from a
-              capability catalogue, calculate a verified safety verdict, and show you the whole
-              trace as it happens.
+              Ask in plain language. ORCA will choose the right tools, calculate a verified
+              safety verdict where needed, and answer about the place you selected on the map.
             </p>
             {!disabled && (
               <div className="space-y-1">
@@ -392,9 +449,10 @@ export function ChatPanel({
           </div>
         )}
 
-        {/* The plan as a live status strip: which step is in flight, right now,
-            without having to scroll the trace to find out. */}
-        {run.plan.length > 0 && (
+        {run.running && !SHOW_AGENT_TRACE && <WorkingMotion />}
+
+        {/* Detailed plan + agent trace kept in code; hidden for the prototype UI. */}
+        {SHOW_AGENT_TRACE && run.plan.length > 0 && (
           <div className="raised mb-3 rounded px-2.5 py-2">
             <div className="label mb-1.5">
               Plan · {run.plan.filter((s) => s.status === 'done').length}/{run.plan.length} complete
@@ -423,7 +481,7 @@ export function ChatPanel({
           </div>
         )}
 
-        {run.events.length > 0 && (
+        {SHOW_AGENT_TRACE && run.events.length > 0 && (
           <div className="border-hairline mb-3 border-t pt-2">
             <div className="label mb-2 flex items-center gap-1.5">
               <span>Agent trace</span>
@@ -444,7 +502,7 @@ export function ChatPanel({
           <div className="border-hairline border-t pt-3">
             <div className="label mb-1.5">ORCA</div>
             <Answer text={run.final.answer} />
-            {run.final.critic?.rounds > 1 && (
+            {SHOW_AGENT_TRACE && run.final.critic?.rounds > 1 && (
               <p className="text-amber mt-2 flex items-start gap-1 text-2xs leading-snug">
                 <Gavel className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
                 <span>

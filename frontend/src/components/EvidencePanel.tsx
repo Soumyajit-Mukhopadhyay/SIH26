@@ -47,7 +47,7 @@ const LABELS: Record<string, string> = {
   wind_gust: 'Gusts',
   wind_direction: 'Wind direction',
   visibility: 'Visibility',
-  convective_energy: 'CAPE (thunderstorm proxy)',
+  convective_energy: 'CAPE (instability indicator)',
   convective_inhibition: 'CIN',
   precipitation: 'Precipitation',
   sst: 'Sea surface temp (model)',

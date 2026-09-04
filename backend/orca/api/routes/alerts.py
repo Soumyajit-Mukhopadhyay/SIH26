@@ -37,7 +37,9 @@ HEARTBEAT_S = 15.0
 class WatchRequest(BaseModel):
     lat: Lat
     lon: Lon
-    loa_m: float = Field(default=8.2, gt=0, le=200)
+    #: Optional. Precedence: boat_class_code > loa_m > UNKNOWN.
+    loa_m: float | None = Field(default=None, gt=0, le=200)
+    boat_class_code: str | None = None
     label: str | None = None
     heading_deg: float | None = Field(default=None, ge=0, lt=360)
     speed_kn: float | None = Field(default=None, ge=0, le=40)
@@ -49,6 +51,7 @@ async def add_watch(request: WatchRequest) -> dict[str, Any]:
         lat=float(request.lat),
         lon=float(request.lon),
         loa_m=request.loa_m,
+        boat_class_code=request.boat_class_code,
         label=request.label,
         heading_deg=request.heading_deg,
         speed_kn=request.speed_kn,
@@ -74,6 +77,7 @@ class WatchUpdate(BaseModel):
     lat: Lat | None = None
     lon: Lon | None = None
     loa_m: float | None = Field(default=None, gt=0, le=200)
+    boat_class_code: str | None = None
     heading_deg: float | None = Field(default=None, ge=0, lt=360)
     speed_kn: float | None = Field(default=None, ge=0, le=40)
 
@@ -105,6 +109,9 @@ async def update_watch(watch_id: str, request: WatchUpdate) -> dict[str, Any]:
     if request.loa_m is not None and request.loa_m != entry.loa_m:
         changed["loa_m"] = [entry.loa_m, request.loa_m]
         entry.loa_m = request.loa_m
+    if request.boat_class_code is not None and request.boat_class_code != entry.boat_class_code:
+        changed["boat_class_code"] = [entry.boat_class_code, request.boat_class_code]
+        entry.boat_class_code = request.boat_class_code
     if request.heading_deg is not None:
         entry.heading_deg = request.heading_deg
     if request.speed_kn is not None:

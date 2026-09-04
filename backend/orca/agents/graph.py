@@ -71,7 +71,8 @@ class OrcaState(TypedDict, total=False):
     lat: float
     lon: float
     place: str | None
-    loa_m: float
+    loa_m: float | None
+    boat_class_code: str | None
 
     plan: list[PlanStep]
     plan_rationale: str
@@ -91,6 +92,8 @@ class OrcaState(TypedDict, total=False):
     critic_reason: str
     llm_provider: str
     risk: dict[str, Any] | None
+    #: Phase 2 — structured decision with six independent dimensions.
+    structured_decision: dict[str, Any] | None
 
 
 # --------------------------------------------------------------------------- #
@@ -154,7 +157,7 @@ async def interaction(state: OrcaState) -> OrcaState:
 
     detail = (
         f"question received · {state.get('lat', 0):.3f}°N "
-        f"{state.get('lon', 0):.3f}°E · vessel {state.get('loa_m', 8.2)} m"
+        f"{state.get('lon', 0):.3f}°E · {_vessel_detail(state)}"
     )
     if split.is_compound:
         detail += f" · {len(split.parts)} sub-questions detected"
@@ -195,7 +198,8 @@ async def planner(state: OrcaState) -> OrcaState:
                 tools=tools,
                 lat=state.get("lat", 0),
                 lon=state.get("lon", 0),
-                loa_m=state.get("loa_m", 8.2),
+                loa_m=state.get("loa_m"),
+                boat_class_code=state.get("boat_class_code"),
             ),
         },
     ]
@@ -297,7 +301,8 @@ async def execute(state: OrcaState) -> OrcaState:
     kwargs = {
         "lat": state.get("lat", 0.0),
         "lon": state.get("lon", 0.0),
-        "loa_m": state.get("loa_m", 8.2),
+        "loa_m": state.get("loa_m"),
+        "boat_class_code": state.get("boat_class_code"),
     }
 
     for step in plan:
@@ -346,6 +351,39 @@ async def execute(state: OrcaState) -> OrcaState:
     }
 
 
+async def orchestrate(state: OrcaState) -> OrcaState:
+    """Build the Phase 2 structured decision from tool results and risk.
+
+    Runs after ``execute`` and before ``visualisation`` so that every
+    downstream node — reporting, critic, and the final event — has access to
+    the six independent decision dimensions.
+
+    This node is deterministic: it calls ``resolve_decision`` with the tool
+    results already in state.  The LLM never touches this object.
+    """
+    from orca.services.decision import resolve_decision
+
+    decision = resolve_decision(
+        tool_results=state.get("tool_results", []),
+        risk=state.get("risk"),
+        boat_class_code=state.get("boat_class_code"),
+        loa_m=state.get("loa_m"),
+    )
+
+    final_action = (decision.get("final_status") or {}).get("action", "UNVERIFIABLE")
+    event = _event(
+        "decision",
+        final_action=final_action,
+        official_status=(decision.get("official_status") or {}).get("status"),
+        legal_status=(decision.get("legal_status") or {}).get("status"),
+        geographic_status=(decision.get("geographic_status") or {}).get("status"),
+        environmental_verdict=(decision.get("environmental_status") or {}).get("verdict"),
+        fishing_opportunity=(decision.get("fishing_opportunity") or {}).get("status"),
+        reason_codes=(decision.get("final_status") or {}).get("reason_codes", []),
+    )
+    return {"structured_decision": decision, "events": [event]}
+
+
 async def visualisation(state: OrcaState) -> OrcaState:
     """Emit the ``ui_spec``: what the map should do about this answer.
 
@@ -373,6 +411,9 @@ async def visualisation(state: OrcaState) -> OrcaState:
     lat = state.get("lat", 0.0)
     lon = state.get("lon", 0.0)
     span = 3.0
+    decision = state.get("structured_decision") or {}
+    final_action = (decision.get("final_status") or {}).get("action")
+
     spec = {
         "camera": {"lat": lat, "lon": lon, "zoom": 7},
         "bbox": [lon - span, lat - span, lon + span, lat + span],
@@ -383,6 +424,19 @@ async def visualisation(state: OrcaState) -> OrcaState:
             else []
         ),
         "card": ((state.get("risk") or {}).get("verdict", "").lower().replace("-", "") or None),
+        # Phase 2 — structured decision summary for the UI
+        "decision": {
+            "final_action": final_action,
+            "official_status": (decision.get("official_status") or {}).get("status"),
+            "legal_status": (decision.get("legal_status") or {}).get("status"),
+            "geographic_status": (decision.get("geographic_status") or {}).get("status"),
+            "environmental_verdict": (decision.get("environmental_status") or {}).get("verdict"),
+            "fishing_opportunity": (decision.get("fishing_opportunity") or {}).get("status"),
+            "reason_codes": (decision.get("final_status") or {}).get("reason_codes", []),
+            "data_confidence": (decision.get("data_status") or {}).get("confidence"),
+        }
+        if decision
+        else None,
     }
     return {"ui_spec": spec, "events": [_event("ui_spec", spec=spec)]}
 
@@ -403,7 +457,9 @@ async def reporting(state: OrcaState) -> OrcaState:
                 results=state.get("tool_results", []),
                 risk=risk,
                 place=state.get("place"),
-                loa_m=state.get("loa_m", 8.2),
+                loa_m=state.get("loa_m"),
+                boat_class_code=state.get("boat_class_code"),
+                structured_decision=state.get("structured_decision"),
                 revision_note=state.get("critic_reason") if state.get("critic_rounds") else None,
                 sub_questions=[str(part.get("text", "")) for part in parts if part.get("text")],
                 references=references,
@@ -497,7 +553,7 @@ def _structured_report(results: list[dict[str, Any]]) -> str | None:
             )
         lines.append(
             "\n**In short:** Do not treat these PFZ candidates as cleared right now. The "
-            "convective value is a CAPE-derived proxy—not an official lightning alert—and the "
+            "convective value is a CAPE instability indicator—not an official lightning alert—and the "
             "PFZ field is stale, so confirm the latest IMD and INCOIS advisories before acting."
         )
         return "\n".join(lines)
@@ -651,6 +707,114 @@ async def critic(state: OrcaState) -> OrcaState:
             problems.append("the draft omits one or more screened AVOID zones")
         if not any(word in lower for word in ("geofence", "eez", "boundary", "jurisdiction")):
             problems.append("the draft does not report the geofence-screening result")
+
+    # ------------------------------------------------------------------ #
+    # Phase 2 — structured-decision critic checks (all deterministic)
+    # ------------------------------------------------------------------ #
+    decision = state.get("structured_decision") or {}
+    if decision:
+        final_action = (decision.get("final_status") or {}).get("action", "")
+        official_code = (decision.get("official_status") or {}).get("status", "UNKNOWN")
+        legal_code = (decision.get("legal_status") or {}).get("status", "UNKNOWN")
+        env_verdict_d = (decision.get("environmental_status") or {}).get("verdict", "")
+        pfz_status = (decision.get("fishing_opportunity") or {}).get("status", "UNKNOWN")
+        vessel_source_d = (
+            (decision.get("environmental_status") or {}).get("risk") or {}
+        ).get("vessel_source", "")
+
+        # 1. DO_NOT_PROCEED must not be softened into a recommendation to go
+        if final_action == "DO_NOT_PROCEED":
+            proceed_phrases = (
+                "you can proceed",
+                "safe to venture",
+                "safe to head out",
+                "go ahead and sail",
+                "it is safe to go",
+            )
+            if any(p in lower for p in proceed_phrases):
+                problems.append(
+                    "final action is DO_NOT_PROCEED but draft recommends proceeding"
+                )
+
+        # 2. Active official warning must be mentioned
+        if official_code in ("WARNING", "EMERGENCY"):
+            if not any(
+                w in lower for w in ("warning", "alert", "emergency", "official notice")
+            ):
+                problems.append(
+                    f"official status is {official_code} but draft does not mention it"
+                )
+
+        # 3. Legal prohibition must not be presented as permission
+        if legal_code == "PROHIBITED":
+            if any(
+                p in lower
+                for p in (
+                    "fishing is permitted",
+                    "legally permitted",
+                    "you are allowed to fish",
+                    "no legal restriction",
+                )
+            ):
+                problems.append(
+                    "legal status is PROHIBITED but draft implies fishing is permitted"
+                )
+
+        # 4. UNKNOWN official status must not be expressed as "no warning"
+        if official_code == "UNKNOWN":
+            false_clearances = (
+                "no warning detected",
+                "no active warning",
+                "no official warning",
+                "no alerts were found",
+                "confirmed safe from warnings",
+            )
+            if any(p in lower for p in false_clearances):
+                problems.append(
+                    "official status is UNKNOWN but draft claims no warning exists"
+                )
+
+        # 5. UNKNOWN legal status must not be expressed as permission
+        if legal_code == "UNKNOWN":
+            false_permissions = (
+                "fishing is permitted",
+                "legally permitted",
+                "no legal restriction",
+                "permission to fish",
+            )
+            if any(p in lower for p in false_permissions):
+                problems.append(
+                    "legal status is UNKNOWN but draft claims fishing is legally permitted"
+                )
+
+        # 6. Unknown vessel + UNVERIFIABLE environment must not claim vessel safety
+        if vessel_source_d == "unknown" and env_verdict_d == "UNVERIFIABLE":
+            vessel_safety_claims = (
+                "safe for your vessel",
+                "your boat can handle",
+                "vessel is safe",
+                "within limits for your boat",
+            )
+            if any(p in lower for p in vessel_safety_claims):
+                problems.append(
+                    "vessel is UNKNOWN and environment UNVERIFIABLE but draft claims "
+                    "vessel-specific safety"
+                )
+
+        # 7. PFZ HIGH must not be presented as overriding a DO_NOT_PROCEED decision
+        if pfz_status == "HIGH" and final_action == "DO_NOT_PROCEED":
+            pfz_override_phrases = (
+                "pfz means it is safe",
+                "fishing zone is clear to use",
+                "pfz clears the restriction",
+                "high pfz overrides",
+            )
+            if any(p in lower for p in pfz_override_phrases):
+                problems.append(
+                    "PFZ is HIGH but final action is DO_NOT_PROCEED; "
+                    "draft must not imply PFZ overrides safety or legal restrictions"
+                )
+
     approved = not problems or rounds >= MAX_CRITIC_ROUNDS
     verdict_label = "approve" if not problems else ("escalate" if approved else "revise")
     reason = "; ".join(problems) if problems else "draft matches the verified evidence"
@@ -857,6 +1021,7 @@ def build_graph() -> Any:
     graph.add_node("interaction", interaction)
     graph.add_node("planner", planner)
     graph.add_node("execute", execute)
+    graph.add_node("orchestrate", orchestrate)  # Phase 2 — decision layer
     graph.add_node("visualisation", visualisation)
     graph.add_node("reporting", reporting)
     graph.add_node("critic", critic)
@@ -864,7 +1029,8 @@ def build_graph() -> Any:
     graph.set_entry_point("interaction")
     graph.add_edge("interaction", "planner")
     graph.add_edge("planner", "execute")
-    graph.add_edge("execute", "visualisation")
+    graph.add_edge("execute", "orchestrate")
+    graph.add_edge("orchestrate", "visualisation")
     graph.add_edge("visualisation", "reporting")
     graph.add_edge("reporting", "critic")
     graph.add_conditional_edges("critic", route_after_critic, {"reporting": "reporting", END: END})
@@ -882,12 +1048,23 @@ def compiled_graph() -> Any:
     return _compiled
 
 
+def _vessel_detail(state: OrcaState) -> str:
+    code = state.get("boat_class_code")
+    loa = state.get("loa_m")
+    if code:
+        return f"vessel category {code}" + (f" · LOA {loa} m" if loa is not None else "")
+    if loa is not None:
+        return f"vessel LOA {loa} m"
+    return "vessel UNKNOWN"
+
+
 async def run(
     question: str,
     *,
     lat: float,
     lon: float,
-    loa_m: float = 8.2,
+    loa_m: float | None = None,
+    boat_class_code: str | None = None,
     place: str | None = None,
     locale: str = "en",
 ) -> AsyncIterator[dict[str, Any]]:
@@ -895,12 +1072,14 @@ async def run(
 
     Yields our own event schema rather than LangGraph's raw stream, so the SSE
     contract is ours and does not move when the framework's does.
+    Vessel: boat_class_code > loa_m > UNKNOWN (no silent 8.2).
     """
     initial: OrcaState = {
         "question": question,
         "lat": lat,
         "lon": lon,
         "loa_m": loa_m,
+        "boat_class_code": boat_class_code,
         "place": place,
         "locale": locale,
         "plan": [],
@@ -939,6 +1118,7 @@ async def run(
         answer=final.get("answer") or final.get("draft", ""),
         decomposition=final.get("decomposition"),
         risk=final.get("risk"),
+        structured_decision=final.get("structured_decision"),
         ui_spec=final.get("ui_spec"),
         plan=final.get("plan", []),
         evidence=[e.model_dump(mode="json") for e in evidence],

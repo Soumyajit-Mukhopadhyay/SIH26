@@ -89,7 +89,9 @@ class Watch:
     id: str
     lat: float
     lon: float
-    loa_m: float
+    #: Optional LOA. Precedence with boat_class_code: category > LOA > UNKNOWN.
+    loa_m: float | None = None
+    boat_class_code: str | None = None
     label: str | None = None
     heading_deg: float | None = None
     speed_kn: float | None = None
@@ -110,6 +112,7 @@ class Watch:
             "lat": self.lat,
             "lon": self.lon,
             "loa_m": self.loa_m,
+            "boat_class_code": self.boat_class_code,
             "label": self.label,
             "created_at": self.created_at,
             "last_checked_at": self.last_checked_at,
@@ -177,7 +180,8 @@ class Monitor:
         *,
         lat: float,
         lon: float,
-        loa_m: float = 8.2,
+        loa_m: float | None = None,
+        boat_class_code: str | None = None,
         label: str | None = None,
         heading_deg: float | None = None,
         speed_kn: float | None = None,
@@ -187,6 +191,7 @@ class Monitor:
             lat=lat,
             lon=lon,
             loa_m=loa_m,
+            boat_class_code=boat_class_code,
             label=label,
             heading_deg=heading_deg,
             speed_kn=speed_kn,
@@ -237,7 +242,11 @@ class Monitor:
 
         try:
             evidence = await conditions_at(entry.lat, entry.lon)
-            risk = assess_from_evidence(evidence, loa_m=entry.loa_m)
+            risk = assess_from_evidence(
+                evidence,
+                loa_m=entry.loa_m,
+                boat_class_code=entry.boat_class_code,
+            )
         except Exception as exc:  # noqa: BLE001 — a watch must survive a bad poll
             entry.errors += 1
             entry.last_checked_at = now

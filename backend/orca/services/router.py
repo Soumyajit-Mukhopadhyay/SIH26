@@ -9,13 +9,13 @@ thresholds of its own.
 
 Three design decisions worth stating:
 
-**The land mask is the wave model's own silence.** Open-Meteo's Marine API
-returns null for wave height over land, so a node with no wave height is a node
-the wave model declines to answer for, which is exactly the set a boat must not
-cross. That is a better land test than any coastline polygon we could ship at
-this resolution, and it collapses "unroutable" and "unmeasurable" into one
-state — which is the honest position, because a cell ORCA cannot measure is not
-a cell ORCA can clear.
+**The land mask is two tests, both required.** Open-Meteo's Marine API often
+returns a wave height for coastal and even inland 0.25° cells (the model
+interpolates from nearby sea). Treating "wave is not None" as water is how a
+Mumbai–Gujarat passage walks across Maharashtra. So a cell is water only when
+it has a wave height *and* sits inside India's EEZ polygon — the maritime
+area, not the landward side of the coastline. Edges are checked the same way
+at their midpoint so an 8-connected hop cannot cut a peninsula.
 
 **A rejected route is an answer.** When no passage exists the caller gets the
 reason, node by node: this is why the direct line fails, this is what blocks
@@ -39,12 +39,12 @@ from typing import Any
 
 from orca.services.geo import geodesic_m
 from orca.services.risk_engine import RiskResult, assess
-from orca.services.thresholds import BoatClass, classify
+from orca.services.thresholds import BoatClass, resolve_vessel
 from orca.sources.open_meteo import CALLS_PER_MINUTE_BUDGET
 
 log = logging.getLogger(__name__)
 
-ROUTER_VERSION = "orca-router-2026.08"
+ROUTER_VERSION = "orca-router-2026.09"
 
 #: Lattice spacing. 0.25° is ~28 km, which is both the scale at which the wave
 #: model has independent information and about the scale at which a fishing boat
@@ -82,6 +82,96 @@ DETOUR_WEIGHT = 4.0
 #: Eight-connected. Four-connected produces visible staircase routes that no
 #: skipper would follow and that overstate distance by up to 41%.
 _NEIGHBOURS = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
+
+
+def _water_polygon():
+    """India's EEZ — sea only. ``None`` when the geofence index is not loaded."""
+    try:
+        from orca.services.geofence import index as geofence_index
+    except Exception:  # noqa: BLE001
+        return None
+    for fence in geofence_index.fences():
+        if fence.key == "eez_india" and fence.is_area:
+            return fence.geometry
+    return None
+
+
+def in_navigable_water(lat: float, lon: float) -> bool | None:
+    """Whether ``(lat, lon)`` is inside India's EEZ water mask.
+
+    ``None`` means the mask is unavailable — callers must not treat that as
+    clearance, but they also must not invent a land veto from silence.
+    """
+    polygon = _water_polygon()
+    if polygon is None:
+        return None
+    from shapely.geometry import Point
+
+    # ``covers`` includes the coastline itself; ``contains`` would reject a
+    # harbour click that sits on the EEZ boundary.
+    return bool(polygon.covers(Point(lon, lat)))
+
+
+def _land_reason(lat: float, lon: float, wave: float | None) -> str | None:
+    """Why this cell is not navigable water, or ``None`` if it may be routed."""
+    if wave is None:
+        return "no wave height here — land, or outside the wave model's domain"
+    sea = in_navigable_water(lat, lon)
+    if sea is False:
+        return "inland of India's EEZ — not navigable water"
+    return None
+
+
+def _edge_crosses_land(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> bool:
+    """True when the hop itself leaves the sea (diagonal cut across a peninsula)."""
+    mid = in_navigable_water((a_lat + b_lat) / 2.0, (a_lon + b_lon) / 2.0)
+    return mid is False
+
+
+def closest_sea(lat: float, lon: float) -> tuple[float, float] | None:
+    """The requested point if it is at sea, else the nearest EEZ-water point.
+
+    Coastal clicks sit on the land/water line. The lattice then ends ~28 km
+    offshore at a cell centre. Pinning the drawn path here is what actually
+    reaches the place the skipper marked.
+    """
+    if in_navigable_water(lat, lon) is True:
+        return (lat, lon)
+    polygon = _water_polygon()
+    if polygon is None:
+        return None
+    from shapely.geometry import Point
+    from shapely.ops import nearest_points
+
+    # First geometry is the sea; that is the pin. The second is the query
+    # point itself — unpacking the other way left inland clicks unchanged.
+    near, _ = nearest_points(polygon, Point(lon, lat))
+    return (float(near.y), float(near.x))
+
+
+def _marked_vertex(lat: float, lon: float) -> list[float]:
+    return [round(lon, 4), round(lat, 4)]
+
+
+def _extend_drawn_path(
+    lattice_path: list[list[float]],
+    start: tuple[float, float],
+    goal: tuple[float, float],
+) -> list[list[float]]:
+    """Prepend/append the marked ends so the line reaches the click, not only the cell.
+
+    A* still only walks passable sea cells. These stubs are drawing, not a claim
+    that the last few hundred metres were costed — a harbour click sits on the
+    land/water line and the lattice cannot land on it.
+    """
+    out = list(lattice_path)
+    first = _marked_vertex(*start)
+    last = _marked_vertex(*goal)
+    if not out or geodesic_m(start[0], start[1], out[0][1], out[0][0]) > 200:
+        out = [first, *out]
+    if not out or geodesic_m(goal[0], goal[1], out[-1][1], out[-1][0]) > 200:
+        out = [*out, last]
+    return out
 
 
 @dataclass(slots=True)
@@ -187,10 +277,9 @@ async def cost_lattice(lattice: Lattice, *, boat: BoatClass) -> tuple[Lattice, l
 
     for (i, j), lat, lon, conditions in zip(keys, lats, lons, samples, strict=True):
         wave = conditions.get("wave_height")
-        if wave is None:
-            # The wave model returned nothing here. Land, or outside the marine
-            # domain, or a cell it will not answer for — in every case a cell a
-            # router must not cross, and one ORCA cannot clear.
+        land = _land_reason(lat, lon, wave)
+        if land is not None:
+            # Wave silence *or* an inland cell the Marine API still filled.
             lattice.nodes[(i, j)] = Node(
                 i=i,
                 j=j,
@@ -199,7 +288,7 @@ async def cost_lattice(lattice: Lattice, *, boat: BoatClass) -> tuple[Lattice, l
                 conditions=conditions,
                 risk=None,
                 passable=False,
-                reason="no wave height here — land, or outside the wave model's domain",
+                reason=land,
             )
             continue
 
@@ -352,6 +441,8 @@ def astar(
             neighbour = lattice.nodes.get(key)
             if neighbour is None or not neighbour.passable or key in closed:
                 continue
+            if _edge_crosses_land(node.lat, node.lon, neighbour.lat, neighbour.lon):
+                continue
             step = geodesic_m(node.lat, node.lon, neighbour.lat, neighbour.lon)
             tentative = g[current] + step * _penalty(neighbour.risk)
             if tentative < g.get(key, math.inf):
@@ -396,14 +487,37 @@ async def plan(
     *,
     start: tuple[float, float],
     goal: tuple[float, float],
-    loa_m: float = 8.2,
+    loa_m: float | None = None,
     boat_class: BoatClass | None = None,
+    boat_class_code: str | None = None,
     speed_kn: float = 8.0,
     step_deg: float = DEFAULT_STEP_DEG,
     corridor_deg: float = DEFAULT_CORRIDOR_DEG,
 ) -> dict[str, Any]:
-    """Plan a passage, or explain in detail why there is not one."""
-    boat = boat_class or classify(loa_m)
+    """Plan a passage, or explain in detail why there is not one.
+
+    Vessel precedence: explicit ``boat_class`` / ``boat_class_code`` → ``loa_m``
+    → UNKNOWN (no silent 8.2 m / IND-MOT-S).
+    """
+    if boat_class is None:
+        resolved = resolve_vessel(boat_class_code=boat_class_code, loa_m=loa_m)
+        if resolved.error or resolved.boat is None:
+            return {
+                "ok": False,
+                "vessel_unknown": True,
+                "router_version": ROUTER_VERSION,
+                "boat_class": "UNKNOWN",
+                "reason": (
+                    resolved.error
+                    or (
+                        "Vessel type not specified. ORCA will not invent a boat class to "
+                        "claim a route is safe."
+                    )
+                ),
+            }
+        boat = resolved.boat
+    else:
+        boat = boat_class
     lattice = build_lattice(start=start, goal=goal, step_deg=step_deg, corridor_deg=corridor_deg)
     _, missing_variables = await cost_lattice(lattice, boat=boat)
 
@@ -412,7 +526,7 @@ async def plan(
 
     total_nodes = len(lattice.nodes)
     passable = sum(1 for n in lattice.nodes.values() if n.passable)
-    water = sum(1 for n in lattice.nodes.values() if n.conditions.get("wave_height") is not None)
+    water = sum(1 for n in lattice.nodes.values() if n.risk is not None)
     blocked_by_veto = water - passable
 
     lattice_report = {
@@ -507,6 +621,26 @@ async def plan(
     order = {"GO": 0, "CAUTION": 1, "NO-GO": 2, "UNVERIFIABLE": 3}
     worst = max(verdicts, key=lambda v: order.get(v, 0)) if verdicts else "UNVERIFIABLE"
 
+    lattice_coords = [
+        [round(lattice.nodes[k].lon, 4), round(lattice.nodes[k].lat, 4)] for k in path
+    ]
+    drawn = _extend_drawn_path(lattice_coords, start, goal)
+    if len(drawn) >= 2:
+        pinned = 0.0
+        for a, b in itertools.pairwise(drawn):
+            pinned += geodesic_m(a[1], a[0], b[1], b[0])
+        route_m = pinned
+
+    dest_pin = closest_sea(*goal)
+    if dest_pin is not None and geodesic_m(*goal, *dest_pin) > 200:
+        target_note = (
+            f"closest sea to the marked point "
+            f"({geodesic_m(*goal, *dest_pin) / 1000:.1f} km) — the costed route stays "
+            "on water; the last drawn stub reaches the mark"
+        )
+    else:
+        target_note = "at the marked destination"
+
     hours = (route_m / 1852.0) / max(0.5, speed_kn)
 
     return {
@@ -519,7 +653,7 @@ async def plan(
         "start_note": source_note,
         "goal_note": target_note,
         "waypoints": [lattice.nodes[key].describe() for key in simplified],
-        "path": [[round(lattice.nodes[k].lon, 4), round(lattice.nodes[k].lat, 4)] for k in path],
+        "path": drawn,
         "distance_nm": round(route_m / 1852.0, 1),
         "direct_nm": round(direct_m / 1852.0, 1),
         "detour_pct": round(100.0 * (route_m - direct_m) / max(1.0, direct_m), 1),

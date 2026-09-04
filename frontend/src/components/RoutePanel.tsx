@@ -70,19 +70,23 @@ export function RoutePanel({
   destination,
   onPickDestination,
   pickingDestination,
+  boatClassCode,
   loaM,
   speedKn,
   plan,
   onPlan,
+  onClose,
 }: {
   origin: { lat: number; lon: number; label?: string | null } | null;
   destination: { lat: number; lon: number } | null;
   onPickDestination: () => void;
   pickingDestination: boolean;
-  loaM: number;
+  boatClassCode?: string | null;
+  loaM: number | null;
   speedKn: number;
   plan: RoutePlan | null;
   onPlan: (plan: RoutePlan | null) => void;
+  onClose?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,6 +103,7 @@ export function RoutePanel({
         toLat: destination.lat,
         toLon: destination.lon,
         loaM,
+        boatClassCode,
         speedKn,
       });
       onPlan(result);
@@ -125,7 +130,18 @@ export function RoutePanel({
         <RouteIcon className="text-cyan h-3.5 w-3.5" aria-hidden />
         <span className="label">Safe passage</span>
         {plan?.lattice && (
-          <span className="data text-ink-3 ml-auto text-2xs">{plan.lattice.step_deg}° lattice</span>
+          <span className={clsx('data text-ink-3 text-2xs', !onClose && 'ml-auto')}>
+            {plan.lattice.step_deg}° lattice
+          </span>
+        )}
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-ink-3 hover:text-ink-1 ml-auto text-2xs transition-colors"
+          >
+            close
+          </button>
         )}
       </div>
 
@@ -229,10 +245,10 @@ export function RoutePanel({
 
           <p className="text-ink-2 text-2xs leading-snug">{plan.why_this_route}</p>
 
-          {plan.goal_note && plan.goal_note.includes('snapped') && (
+          {plan.goal_note && plan.goal_note.includes('closest sea') && (
             <p className="text-amber flex items-start gap-1 text-2xs leading-snug">
               <AlertTriangle className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
-              Destination {plan.goal_note} — the route ends there, not at the point you clicked.
+              Destination {plan.goal_note}.
             </p>
           )}
         </>

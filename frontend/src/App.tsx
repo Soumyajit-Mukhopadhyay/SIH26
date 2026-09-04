@@ -21,7 +21,6 @@ import {
 } from '@deck.gl/layers';
 import type { Layer } from '@deck.gl/core';
 import {
-  Anchor,
   BellRing,
   Bot,
   ChevronLeft,
@@ -30,6 +29,7 @@ import {
   LifeBuoy,
   Loader2,
   MapPin,
+  Navigation,
   Palette,
   Ruler,
   Satellite,
@@ -73,10 +73,11 @@ import { useAlerts } from '@/hooks/useAlerts';
 import { GlobeIntro, markIntroSeen, shouldPlayIntro } from '@/scenes/GlobeIntro';
 import { TreatmentFilters } from '@/components/TreatmentFilters';
 import { TreatmentRail } from '@/components/TreatmentRail';
-import { TREATMENT_BY_ID, type TreatmentId } from '@/lib/treatments';
+import { radarOverlayStyle, TREATMENT_BY_ID, type TreatmentId } from '@/lib/treatments';
 import { useFrameRate } from '@/hooks/useFrameRate';
 import { LayerRail } from '@/components/LayerRail';
 import { BoundaryPanel } from '@/components/BoundaryPanel';
+import { LocationSearch } from '@/components/LocationSearch';
 import { OperationalIntelPanel } from '@/components/OperationalIntelPanel';
 import { useAgentStream } from '@/hooks/useAgentStream';
 import { useRasterImages } from '@/hooks/useRasterImages';
@@ -118,6 +119,28 @@ const MARINE_EVIDENCE = new Set([
   'sea_surface_current_direction',
 ]);
 
+/** Compact chip labels — do not show raw IND-* codes as the primary text. */
+const VESSEL_CHIPS: { code: string; label: string }[] = [
+  { code: 'IND-TRAD', label: 'Traditional / non-motorised' },
+  { code: 'IND-MOT-S', label: 'Small motorised' },
+  { code: 'IND-MECH-S', label: 'Small mechanised' },
+  { code: 'IND-MECH-L', label: 'Large mechanised' },
+  { code: 'IND-DEEPSEA', label: 'Deep-sea' },
+];
+
+/** Default prototype category — category only; never invent an LOA for APIs. */
+const DEFAULT_BOAT_CLASS = 'IND-MOT-S';
+
+/** Visual-only hull length for the 3D sea view. Never sent to safety APIs. */
+function visualLoaM(activeClass: { loa_range_m: [number, number] } | undefined): number {
+  if (activeClass) {
+    const [lo, hiRaw] = activeClass.loa_range_m;
+    const hi = hiRaw >= 1000 ? lo + 10 : hiRaw;
+    return Math.round(((lo + hi) / 2) * 10) / 10;
+  }
+  return 8;
+}
+
 function resolvedSurface(requested: MapSurface, pointForecast: PointForecast): MapSurface {
   if (requested !== 'unknown') return requested;
   return Object.keys(pointForecast.evidence).some((variable) => MARINE_EVIDENCE.has(variable))
@@ -143,7 +166,7 @@ export default function App() {
   const [evidencePanelOpen, setEvidencePanelOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(true);
 
-  const [loaM, setLoaM] = useState(8.2);
+  const [boatClassCode, setBoatClassCode] = useState<string>(DEFAULT_BOAT_CLASS);
 
   const { run: agentRun, ask: askAgent, stop: stopAgent } = useAgentStream();
 
@@ -153,6 +176,7 @@ export default function App() {
   const [replyLanguage, setReplyLanguage] = useState('en');
   const [speakReply, setSpeakReply] = useState(true);
   const [seaViewOpen, setSeaViewOpen] = useState(false);
+  const [routeOpen, setRouteOpen] = useState(false);
   const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
   const [routeDestination, setRouteDestination] = useState<{ lat: number; lon: number } | null>(
     null,
@@ -174,6 +198,7 @@ export default function App() {
   const alerts = useAlerts();
   const [alertRailOpen, setAlertRailOpen] = useState(false);
   const [intelOpen, setIntelOpen] = useState(false);
+  const [leftRailOpen, setLeftRailOpen] = useState(true);
   const [watchId, setWatchId] = useState<string | null>(null);
 
   // Keep the watch pointed at the vessel and position the console is showing.
@@ -184,11 +209,11 @@ export default function App() {
     void alerts.retarget(watchId, {
       lat: selection?.lat,
       lon: selection?.lon,
-      loaM,
+      boatClassCode,
     });
     // `alerts` is a stable hook object; the dependency that matters is the trip.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchId, loaM, selection?.lat, selection?.lon]);
+  }, [watchId, boatClassCode, selection?.lat, selection?.lon]);
 
   useEffect(() => {
     let live = true;
@@ -209,7 +234,20 @@ export default function App() {
   const [intro, setIntro] = useState(shouldPlayIntro);
   const [treatment, setTreatment] = useState<TreatmentId>('standard');
   const [treatmentRailOpen, setTreatmentRailOpen] = useState(false);
+  const [lookOrigin, setLookOrigin] = useState<{ x: number; y: number } | null>(null);
   const look = TREATMENT_BY_ID[treatment];
+  const lookOverlay =
+    treatment === 'radar' && lookOrigin
+      ? radarOverlayStyle(lookOrigin.x, lookOrigin.y)
+      : look.overlay;
+
+  const syncLookOrigin = useCallback(() => {
+    if (!selection) {
+      setLookOrigin(null);
+      return;
+    }
+    setLookOrigin(mapRef.current?.projectPct(selection.lon, selection.lat) ?? null);
+  }, [selection]);
 
   // The guard measures continuously but only ever takes away a treatment — there
   // is nothing to give up in Standard, and dropping data layers to protect a
@@ -219,6 +257,10 @@ export default function App() {
     label: `the ${look.label} treatment`,
     onDegrade: () => setTreatment('standard'),
   });
+
+  useEffect(() => {
+    syncLookOrigin();
+  }, [syncLookOrigin, treatment]);
 
   const [rasters, setRasters] = useState<RasterCatalogue | null>(null);
   const [activeLayers, setActiveLayers] = useState<Set<string>>(new Set(['sst']));
@@ -232,8 +274,8 @@ export default function App() {
   const [fences, setFences] = useState<FenceCollection | null>(null);
   const [geofence, setGeofence] = useState<GeofenceCheck | null>(null);
   const [showFences, setShowFences] = useState(true);
-  const [heading, setHeading] = useState<number | null>(null);
-  const [speed, setSpeed] = useState(8.0);
+  const [heading] = useState<number | null>(null);
+  const [speed] = useState(8.0);
 
   // ---- boot ----
   useEffect(() => {
@@ -318,7 +360,6 @@ export default function App() {
       lon: number,
       lat: number,
       label?: string,
-      loa = loaM,
       requestedSurface: MapSurface = 'unknown',
     ) => {
       const queryEpoch = ++pointQueryEpoch.current;
@@ -331,14 +372,16 @@ export default function App() {
         setRoutePlan(null);
         setPickingDestination(false);
         setSeaViewOpen(false);
+        setRouteOpen(false);
       }
       try {
         // Fetched together on purpose: the verdict and the evidence panel must
         // be reading the same numbers, or the card and the panel could disagree
         // on screen, which would be worse than either being slightly stale.
+        // Vessel comes from state only — never invent a default LOA for safety.
         const [pointForecast, verdict] = await Promise.all([
           api.forecastPoint(lat, lon, requestedSurface !== 'land'),
-          api.assessRisk(lat, lon, loa),
+          api.assessRisk(lat, lon, null, boatClassCode),
         ]);
         if (queryEpoch !== pointQueryEpoch.current) return;
         const surface = resolvedSurface(requestedSurface, pointForecast);
@@ -355,6 +398,7 @@ export default function App() {
           setRoutePlan(null);
           setPickingDestination(false);
           setSeaViewOpen(false);
+          setRouteOpen(false);
         } else {
           void api
             .geofenceCheck(
@@ -388,7 +432,7 @@ export default function App() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [loaM, heading, speed],
+    [boatClassCode, heading, speed],
   );
 
   const rejectLandDestination = useCallback(
@@ -411,10 +455,10 @@ export default function App() {
   // canoe and a trawler, and that is the point worth demonstrating.
   useEffect(() => {
     if (selection) {
-      void query(selection.lon, selection.lat, selection.label, loaM, selection.surface);
+      void query(selection.lon, selection.lat, selection.label, selection.surface);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaM]);
+  }, [boatClassCode]);
 
   // A new heading changes time-to-cross but nothing else, so re-check the
   // boundaries without re-fetching the forecast.
@@ -668,7 +712,7 @@ export default function App() {
           stroked: true,
           pickable: true,
           onClick: ({ object }) => {
-            if (object) void query(object.lon, object.lat, object.label, loaM, 'water');
+            if (object) void query(object.lon, object.lat, object.label, 'water');
           },
         }),
       );
@@ -788,7 +832,7 @@ export default function App() {
             stroked: true,
             pickable: true,
             onClick: ({ object }) => {
-              if (object) void query(object.lon, object.lat, undefined, loaM, 'water');
+              if (object) void query(object.lon, object.lat, undefined, 'water');
             },
           }),
         );
@@ -894,10 +938,11 @@ export default function App() {
     flowSpec,
   ]);
 
-  const activeClass = useMemo(
-    () => thresholds?.classes.find((c) => loaM >= c.loa_range_m[0] && loaM < c.loa_range_m[1]),
-    [thresholds, loaM],
-  );
+  const activeClass = useMemo(() => {
+    if (!thresholds || !boatClassCode) return undefined;
+    return thresholds.classes.find((c) => c.code === boatClassCode);
+  }, [thresholds, boatClassCode]);
+  const seaVisualLoaM = visualLoaM(activeClass);
   const isLandSelection = selection?.surface === 'land';
 
   return (
@@ -914,7 +959,171 @@ export default function App() {
         />
       )}
       <TreatmentFilters />
-      <FreshnessStrip health={health} freshness={freshness} />
+      <FreshnessStrip
+        health={health}
+        freshness={freshness}
+        tools={
+          <div
+            className="border-hairline flex h-7 w-max max-w-full overflow-hidden rounded-md border"
+            role="tablist"
+            aria-label="Map tools"
+          >
+            {(
+              [
+                {
+                  id: 'alerts',
+                  label: 'Alerts',
+                  title: 'Alert centre',
+                  Icon: BellRing,
+                  tone: alerts.unseen > 0 ? 'text-red' : 'text-amber',
+                  active: alertRailOpen,
+                  disabled: false,
+                  badge: alerts.unseen,
+                  toggle: () => {
+                    const next = !alertRailOpen;
+                    setAlertRailOpen(next);
+                    if (next) {
+                      alerts.markAllSeen();
+                      setTreatmentRailOpen(false);
+                      setIntelOpen(false);
+                      setSarOpen(false);
+                      setRouteOpen(false);
+                      setSeaViewOpen(false);
+                    }
+                  },
+                },
+                {
+                  id: 'look',
+                  label: 'Look',
+                  title: 'Visual treatments',
+                  Icon: Palette,
+                  tone: 'text-cyan',
+                  active: treatmentRailOpen,
+                  disabled: false,
+                  badge: 0,
+                  toggle: () => {
+                    const next = !treatmentRailOpen;
+                    setTreatmentRailOpen(next);
+                    setIntelOpen(false);
+                    setSarOpen(false);
+                    setRouteOpen(false);
+                    setSeaViewOpen(false);
+                    if (next) setAlertRailOpen(false);
+                  },
+                },
+                {
+                  id: 'intel',
+                  label: 'Intel',
+                  title: 'Orbital & vessel intelligence',
+                  Icon: Satellite,
+                  tone: 'text-cyan',
+                  active: intelOpen,
+                  disabled: false,
+                  badge: 0,
+                  toggle: () => {
+                    const next = !intelOpen;
+                    setIntelOpen(next);
+                    setTreatmentRailOpen(false);
+                    setSarOpen(false);
+                    setRouteOpen(false);
+                    setSeaViewOpen(false);
+                    if (next) setAlertRailOpen(false);
+                  },
+                },
+                {
+                  id: 'sar',
+                  label: 'SAR',
+                  title: 'Search and rescue drift',
+                  Icon: LifeBuoy,
+                  tone: 'text-red',
+                  active: sarOpen,
+                  disabled: false,
+                  badge: 0,
+                  toggle: () => {
+                    const next = !sarOpen;
+                    setSarOpen(next);
+                    setTreatmentRailOpen(false);
+                    setIntelOpen(false);
+                    setRouteOpen(false);
+                    setSeaViewOpen(false);
+                    if (next) setAlertRailOpen(false);
+                  },
+                },
+                {
+                  id: 'passage',
+                  label: 'Safe passage',
+                  title: selection && !isLandSelection
+                    ? 'Plan a cleared passage'
+                    : 'Pick a sea point first',
+                  Icon: Navigation,
+                  tone: 'text-cyan',
+                  active: routeOpen,
+                  disabled: !selection || isLandSelection,
+                  badge: 0,
+                  toggle: () => {
+                    if (!selection || isLandSelection) return;
+                    const next = !routeOpen;
+                    setRouteOpen(next);
+                    setTreatmentRailOpen(false);
+                    setIntelOpen(false);
+                    setSarOpen(false);
+                    setSeaViewOpen(false);
+                    if (next) setAlertRailOpen(false);
+                  },
+                },
+                {
+                  id: 'sea',
+                  label: 'Sea view',
+                  title: selection && !isLandSelection
+                    ? 'Forecast as the sea it describes'
+                    : 'Pick a sea point first',
+                  Icon: Waves,
+                  tone: 'text-cyan',
+                  active: seaViewOpen,
+                  disabled: !selection || isLandSelection,
+                  badge: 0,
+                  toggle: () => {
+                    if (!selection || isLandSelection) return;
+                    const next = !seaViewOpen;
+                    setSeaViewOpen(next);
+                    setTreatmentRailOpen(false);
+                    setIntelOpen(false);
+                    setSarOpen(false);
+                    setRouteOpen(false);
+                    if (next) setAlertRailOpen(false);
+                  },
+                },
+              ] as const
+            ).map((tab, index) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={tab.active}
+                title={tab.title}
+                disabled={tab.disabled}
+                onClick={tab.toggle}
+                className={clsx(
+                  'relative flex h-full items-center gap-1.5 px-2.5 text-2xs transition-colors',
+                  index > 0 && 'border-hairline border-l',
+                  tab.disabled && 'cursor-not-allowed opacity-40',
+                  tab.active ? 'bg-white/8' : 'hover:bg-white/5',
+                )}
+              >
+                <tab.Icon className={clsx('h-3 w-3', tab.tone)} aria-hidden />
+                <span className={clsx('label', tab.active ? 'text-ink-0' : 'text-ink-2')}>
+                  {tab.label}
+                </span>
+                {tab.badge > 0 && (
+                  <span className="bg-red/25 text-red data rounded-full px-1 text-2xs leading-none">
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       <div className="relative flex-1 overflow-hidden">
         {/* The treated layer. Only the MAP is inside it: running a filter over
@@ -934,6 +1143,7 @@ export default function App() {
           <OceanMap
             ref={mapRef}
             layers={layers}
+            onViewChange={syncLookOrigin}
             onClick={(lon, lat, surface) => {
             // While picking a destination the click sets the endpoint and does
             // NOT move the selection: re-running the point forecast would throw
@@ -946,17 +1156,22 @@ export default function App() {
               setRoutePlan(null);
               return;
             }
-            void query(lon, lat, undefined, loaM, surface);
+            void query(lon, lat, undefined, surface);
           }}
             className="absolute inset-0"
           />
-          {look.overlay && (
-            <div className="pointer-events-none absolute inset-0" style={look.overlay} />
+          {lookOverlay && (
+            <div className="pointer-events-none absolute inset-0" style={lookOverlay} />
           )}
         </div>
 
         {/* ---------------- left rail: place and vessel ---------------- */}
-        <div className="pointer-events-none absolute top-3 bottom-3 left-3 z-20 flex w-64 flex-col gap-2 overflow-y-auto">
+        <div
+          className={clsx(
+            'pointer-events-none absolute top-3 bottom-3 left-3 z-20 flex w-64 flex-col gap-2 overflow-y-auto transition-transform duration-200',
+            !leftRailOpen && '-translate-x-[16.75rem]',
+          )}
+        >
           <div className="glass pointer-events-auto rounded-lg">
             <div className="border-hairline flex items-center gap-1.5 border-b px-3 py-2">
               <MapPin className="text-cyan h-3.5 w-3.5" aria-hidden />
@@ -970,31 +1185,14 @@ export default function App() {
                 reset
               </button>
             </div>
-            <div className="max-h-52 overflow-y-auto p-1.5">
-              {landmarks.map((place) => {
-                const active =
-                  selection &&
-                  Math.abs(selection.lat - place.lat) < 1e-6 &&
-                  Math.abs(selection.lon - place.lon) < 1e-6;
-                return (
-                  <button
-                    key={place.key}
-                    type="button"
-                    onClick={() => {
-                      mapRef.current?.flyTo(place.lon, place.lat, 8);
-                      void query(place.lon, place.lat, place.label, loaM, 'water');
-                    }}
-                    className={clsx(
-                      'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors',
-                      active ? 'bg-cyan/12 text-cyan' : 'text-ink-1 hover:bg-abyss-2',
-                    )}
-                  >
-                    <Anchor className="h-3 w-3 shrink-0 opacity-60" aria-hidden />
-                    <span className="truncate">{place.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <LocationSearch
+              landmarks={landmarks}
+              selectedLabel={selection?.label ?? null}
+              onPick={(place) => {
+                mapRef.current?.flyTo(place.lon, place.lat, 8);
+                void query(place.lon, place.lat, place.name, 'water');
+              }}
+            />
           </div>
 
           <div className="glass pointer-events-auto rounded-lg">
@@ -1003,20 +1201,28 @@ export default function App() {
               <span className="label">Your vessel</span>
             </div>
             <div className="p-3">
-              <div className="mb-2 flex items-baseline justify-between">
-                <span className="data text-ink-0 text-lg">{loaM.toFixed(1)} m</span>
-                <span className="text-ink-2 text-2xs">length overall</span>
+              <div className="label text-ink-3 mb-1.5 text-2xs">Boat type</div>
+              <div className="flex flex-wrap gap-1.5">
+                {VESSEL_CHIPS.map((chip) => {
+                  const selected = boatClassCode === chip.code;
+                  return (
+                    <button
+                      key={chip.code}
+                      type="button"
+                      onClick={() => setBoatClassCode(chip.code)}
+                      className={clsx(
+                        'rounded border px-2 py-1 text-2xs leading-snug transition-colors',
+                        selected
+                          ? 'border-cyan/50 bg-cyan/12 text-cyan'
+                          : 'border-hairline text-ink-2 hover:border-cyan/30 hover:text-ink-0',
+                      )}
+                      aria-pressed={selected}
+                    >
+                      {chip.label}
+                    </button>
+                  );
+                })}
               </div>
-              <input
-                type="range"
-                min={3}
-                max={30}
-                step={0.1}
-                value={loaM}
-                onChange={(event) => setLoaM(Number(event.target.value))}
-                className="accent-cyan w-full"
-                aria-label="Boat length overall in metres"
-              />
               {activeClass && (
                 <div className="border-hairline mt-2 border-t pt-2">
                   <div className="text-ink-1 text-2xs leading-snug">{activeClass.label}</div>
@@ -1036,15 +1242,6 @@ export default function App() {
           <div className="pointer-events-auto">
             <BoundaryPanel
               check={isLandSelection ? null : geofence}
-              heading={heading}
-              speed={speed}
-              onHeading={setHeading}
-              onSpeed={setSpeed}
-              capUrl={
-                selection && !isLandSelection
-                  ? api.capUrl(selection.lat, selection.lon, loaM, 'ta')
-                  : null
-              }
               visible={showFences}
               onToggleVisible={() => setShowFences((v) => !v)}
             />
@@ -1063,11 +1260,30 @@ export default function App() {
           </div>
         </div>
 
+        {/* Left rail collapse / expand tab — sits on the right edge of the panel */}
+        <button
+          type="button"
+          onClick={() => setLeftRailOpen((v) => !v)}
+          className={clsx(
+            'glass text-ink-2 hover:text-cyan pointer-events-auto absolute top-1/2 z-30 flex h-12 w-5 -translate-y-1/2 items-center justify-center rounded-r-lg transition-all duration-200',
+            leftRailOpen ? 'left-[16.75rem]' : 'left-0',
+          )}
+          aria-label={leftRailOpen ? 'Collapse left panel' : 'Expand left panel'}
+          title={leftRailOpen ? 'Hide location & vessel panel' : 'Show location & vessel panel'}
+        >
+          {leftRailOpen ? (
+            <ChevronLeft className="h-3 w-3" aria-hidden />
+          ) : (
+            <ChevronRight className="h-3 w-3" aria-hidden />
+          )}
+        </button>
+
         {/* ---------------- centre-left: chat + live trace ---------------- */}
         <div
           className={clsx(
-            'glass pointer-events-auto absolute top-3 bottom-3 left-[17.5rem] z-20 w-[23rem] flex-col rounded-lg',
+            'glass pointer-events-auto absolute top-3 bottom-3 z-20 w-[23rem] flex-col rounded-lg transition-[left] duration-200',
             chatOpen ? 'flex' : 'hidden',
+            leftRailOpen ? 'left-[17.5rem]' : 'left-3',
           )}
         >
           <ChatPanel
@@ -1085,7 +1301,7 @@ export default function App() {
                 question,
                 lat: selection.lat,
                 lon: selection.lon,
-                loaM,
+                boatClassCode,
                 place: selection.label,
                 replyLanguage,
                 speak: speakReply,
@@ -1105,7 +1321,10 @@ export default function App() {
           <button
             type="button"
             onClick={() => setChatOpen(true)}
-            className="glass border-cyan/40 text-cyan hover:border-cyan/70 hover:bg-cyan/10 pointer-events-auto absolute bottom-4 left-[17.5rem] z-30 flex h-12 w-12 items-center justify-center rounded-full border shadow-[0_0_28px_-8px_rgba(34,211,238,0.7)] transition-colors"
+            className={clsx(
+              'glass border-cyan/40 text-cyan hover:border-cyan/70 hover:bg-cyan/10 pointer-events-auto absolute bottom-4 z-30 flex h-12 w-12 items-center justify-center rounded-full border shadow-[0_0_28px_-8px_rgba(34,211,238,0.7)] transition-[left,color] duration-200',
+              leftRailOpen ? 'left-[17.5rem]' : 'left-3',
+            )}
             aria-label="Open Ask ORCA chat"
             title="Open Ask ORCA chat"
           >
@@ -1119,57 +1338,56 @@ export default function App() {
           </button>
         )}
 
-        {/* ------- bottom centre: passage planning, then the sea view ------- */}
-        {selection && !isLandSelection && (
-          <div className="pointer-events-none absolute bottom-3 left-[41rem] z-20 w-[22rem]">
+        {/* ------- Safe passage / Sea view panels (opened from the top strip) ------- */}
+        {routeOpen && selection && !isLandSelection && (
+          <div
+            className={clsx(
+              'pointer-events-none absolute bottom-3 z-20 w-[22rem] transition-[left] duration-200',
+              leftRailOpen ? 'left-[41rem]' : 'left-[24.5rem]',
+            )}
+          >
             <RoutePanel
               origin={selection}
               destination={routeDestination}
               onPickDestination={() => setPickingDestination((value) => !value)}
               pickingDestination={pickingDestination}
-              loaM={loaM}
+              boatClassCode={boatClassCode}
+              loaM={null}
               speedKn={speed}
               plan={routePlan}
               onPlan={setRoutePlan}
+              onClose={() => setRouteOpen(false)}
             />
           </div>
         )}
 
-        {/* ------- the forecast as the sea it describes -------
-            Anchored bottom-left of the map area so it grows upward and never
-            covers the verdict card, which stays the authority on the page. */}
-        {selection && !isLandSelection && (
+        {seaViewOpen && selection && !isLandSelection && (
           <div className="pointer-events-none absolute right-[25.5rem] bottom-3 z-20 flex flex-col items-end">
             <SeaStatePanel
               forecast={forecast}
               boatClass={activeClass}
-              loaM={loaM}
-              open={seaViewOpen}
+              loaM={seaVisualLoaM}
+              open
               onToggle={setSeaViewOpen}
             />
           </div>
         )}
 
-        {/* Compact top toolbar. One panel opens downward at a time. */}
+        {/* Panels opened from the top strip drop onto the map. */}
         <div
           className={clsx(
-            'pointer-events-none absolute top-3 z-40 flex h-10 items-start gap-2 min-[1701px]:left-1/2 min-[1701px]:-translate-x-1/2',
-            chatOpen ? 'left-[41rem]' : 'left-[17.5rem]',
+            'pointer-events-none absolute top-3 z-40 flex items-start gap-2 transition-[left] duration-200',
+            chatOpen
+              ? leftRailOpen
+                ? 'left-[41rem]'
+                : 'left-[24.5rem]'
+              : leftRailOpen
+                ? 'left-[17.5rem]'
+                : 'left-3',
           )}
         >
-          <div className="relative h-10 w-10 shrink-0">
-            {alertRailOpen && (
-              <button
-                type="button"
-                onClick={() => setAlertRailOpen(false)}
-                className="glass text-cyan pointer-events-auto absolute inset-0 flex items-center justify-center rounded-lg"
-                aria-label="Close alerts"
-                title="Close alerts"
-              >
-                <BellRing className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            )}
-            <div className={clsx('absolute left-0', alertRailOpen ? 'top-12' : 'top-0')}>
+          {alertRailOpen && (
+            <div className="pointer-events-auto">
               <AlertRail
                 alerts={alerts.alerts}
                 status={alerts.status}
@@ -1191,132 +1409,111 @@ export default function App() {
                     .watch({
                       lat: selection.lat,
                       lon: selection.lon,
-                      loaM,
+                      boatClassCode,
                       label: selection.label,
                     })
                     .then(setWatchId)
                     .catch(() => setWatchId(null));
                 }}
-                open={alertRailOpen}
+                open
                 onToggle={(open) => {
                   setAlertRailOpen(open);
                   if (open) {
                     setTreatmentRailOpen(false);
                     setIntelOpen(false);
                     setSarOpen(false);
+                    setRouteOpen(false);
+                    setSeaViewOpen(false);
                   }
                 }}
               />
             </div>
-          </div>
+          )}
 
-          <div className="relative h-10 w-10 shrink-0">
-            {treatmentRailOpen && (
-              <button
-                type="button"
-                onClick={() => setTreatmentRailOpen(false)}
-                className="glass text-cyan pointer-events-auto absolute inset-0 flex items-center justify-center rounded-lg"
-                aria-label="Close visual treatments"
-                title="Close visual treatments"
-              >
-                <Palette className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            )}
-            <div className={clsx('absolute left-0', treatmentRailOpen ? 'top-12' : 'top-0')}>
-              <TreatmentRail
-                active={treatment}
-                onChange={setTreatment}
-                fps={frame.fps}
-                degradedReason={frame.reason}
-                open={treatmentRailOpen}
-                onToggle={(open) => {
-                  setTreatmentRailOpen(open);
-                  if (open) {
-                    setAlertRailOpen(false);
-                    setIntelOpen(false);
-                    setSarOpen(false);
-                  }
-                }}
-              />
-            </div>
-          </div>
+          {(treatmentRailOpen || intelOpen || sarOpen) && (
+            <div className="relative shrink-0">
+              {treatmentRailOpen && (
+                <div className="absolute top-0 left-0">
+                  <TreatmentRail
+                    active={treatment}
+                    onChange={setTreatment}
+                    fps={frame.fps}
+                    degradedReason={frame.reason}
+                    open
+                    onToggle={(open) => {
+                      setTreatmentRailOpen(open);
+                      if (open) {
+                        setAlertRailOpen(false);
+                        setIntelOpen(false);
+                        setSarOpen(false);
+                        setRouteOpen(false);
+                        setSeaViewOpen(false);
+                      }
+                    }}
+                  />
+                </div>
+              )}
 
-          <div className="relative h-10 w-10 shrink-0">
-            {intelOpen && (
-              <button
-                type="button"
-                onClick={() => setIntelOpen(false)}
-                className="glass text-cyan pointer-events-auto absolute inset-0 flex items-center justify-center rounded-lg"
-                aria-label="Close marine intelligence"
-                title="Close marine intelligence"
-              >
-                <Satellite className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            )}
-            <div className={clsx('absolute left-0', intelOpen ? 'top-12' : 'top-0')}>
-              <OperationalIntelPanel
-                point={isLandSelection ? null : selection}
-                open={intelOpen}
-                onToggle={(open) => {
-                  setIntelOpen(open);
-                  if (open) {
-                    setAlertRailOpen(false);
-                    setTreatmentRailOpen(false);
-                    setSarOpen(false);
-                  }
-                }}
-              />
-            </div>
-          </div>
+              {intelOpen && (
+                <div className="absolute top-0 left-0">
+                  <OperationalIntelPanel
+                    point={isLandSelection ? null : selection}
+                    open
+                    onToggle={(open) => {
+                      setIntelOpen(open);
+                      if (open) {
+                        setAlertRailOpen(false);
+                        setTreatmentRailOpen(false);
+                        setSarOpen(false);
+                        setRouteOpen(false);
+                        setSeaViewOpen(false);
+                      }
+                    }}
+                  />
+                </div>
+              )}
 
-          <div className="relative h-10 w-10 shrink-0">
-            {sarOpen && (
-              <button
-                type="button"
-                onClick={() => setSarOpen(false)}
-                className="glass text-red pointer-events-auto absolute inset-0 flex items-center justify-center rounded-lg"
-                aria-label="Close search and rescue"
-                title="Close search and rescue"
-              >
-                <LifeBuoy className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            )}
-            <div className={clsx('absolute left-0', sarOpen ? 'top-12' : 'top-0')}>
-              <SarPanel
-                origin={isLandSelection ? null : selection}
-                hours={sarHours}
-                onHours={setSarHours}
-                objectClass={sarClass}
-                onObjectClass={setSarClass}
-                classes={sarClasses}
-                plan={sarPlan}
-                onPlan={(next) => {
-                  setSarPlan(next);
-                  const ring = next?.areas?.[next.areas.length - 1]?.ring;
-                  if (ring?.length) {
-                    const lons = ring.map((point) => point[0]);
-                    const lats = ring.map((point) => point[1]);
-                    const pad = 0.25;
-                    mapRef.current?.flyToBox(
-                      Math.min(...lons) - pad,
-                      Math.min(...lats) - pad,
-                      Math.max(...lons) + pad,
-                      Math.max(...lats) + pad,
-                    );
-                  }
-                }}
-                open={sarOpen}
-                onToggle={(open) => {
-                  setSarOpen(open);
-                  if (open) {
-                    setAlertRailOpen(false);
-                    setTreatmentRailOpen(false);
-                    setIntelOpen(false);
-                  }
-                }}
-              />
+              {sarOpen && (
+                <div className="absolute top-0 left-0">
+                  <SarPanel
+                    origin={isLandSelection ? null : selection}
+                    hours={sarHours}
+                    onHours={setSarHours}
+                    objectClass={sarClass}
+                    onObjectClass={setSarClass}
+                    classes={sarClasses}
+                    plan={sarPlan}
+                    onPlan={(next) => {
+                      setSarPlan(next);
+                      const ring = next?.areas?.[next.areas.length - 1]?.ring;
+                      if (ring?.length) {
+                        const lons = ring.map((point) => point[0]);
+                        const lats = ring.map((point) => point[1]);
+                        const pad = 0.25;
+                        mapRef.current?.flyToBox(
+                          Math.min(...lons) - pad,
+                          Math.min(...lats) - pad,
+                          Math.max(...lons) + pad,
+                          Math.max(...lats) + pad,
+                        );
+                      }
+                    }}
+                    open
+                    onToggle={(open) => {
+                      setSarOpen(open);
+                      if (open) {
+                        setAlertRailOpen(false);
+                        setTreatmentRailOpen(false);
+                        setIntelOpen(false);
+                        setRouteOpen(false);
+                        setSeaViewOpen(false);
+                      }
+                    }}
+                  />
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
 
         {/* ---------------- right: verdict + evidence ---------------- */}
@@ -1402,7 +1599,7 @@ export default function App() {
 
         {/* ---------------- empty state ---------------- */}
         {!selection && !loading && !error && (
-          <div className="pointer-events-none absolute inset-y-0 right-[25rem] left-[41.5rem] z-10 flex items-center justify-center">
+          <div className={clsx('pointer-events-none absolute inset-y-0 right-[25rem] z-10 flex items-center justify-center transition-[left] duration-200', leftRailOpen ? 'left-[41.5rem]' : 'left-[25rem]')}>
             {/* `pointer-events-none`, deliberately. The card says "click anywhere
                 on the sea" and then, being `pointer-events-auto`, swallowed every
                 click in the middle of the map — a user following the instruction

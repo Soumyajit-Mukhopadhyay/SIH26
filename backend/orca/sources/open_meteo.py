@@ -46,6 +46,9 @@ MARINE_FIELDS: dict[str, str] = {
     "wave_period": "wave_period",
     "wave_direction": "wave_direction",
     "swell_height": "swell_wave_height",
+    # Wind-sea height for INCOIS SVAS BSI rapid-development (Aditya eq 4).
+    # Not a substitute for directional spread; fetched only as Hsea.
+    "wind_wave_height": "wind_wave_height",
     "sst": "sea_surface_temperature",
     "sea_surface_current": "ocean_current_velocity",
     "sea_surface_current_direction": "ocean_current_direction",
@@ -71,6 +74,7 @@ UNITS: dict[str, str] = {
     "wave_period": "s",
     "wave_direction": "deg",
     "swell_height": "m",
+    "wind_wave_height": "m",
     "sst": "degC",
     "sea_surface_current": "m/s",
     "sea_surface_current_direction": "deg",

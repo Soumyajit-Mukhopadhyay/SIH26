@@ -1,17 +1,13 @@
 /**
  * The freshness strip — the top-of-screen instrument readout.
  *
- * This exists because "how do you know your data is real?" is the first question
- * a jury asks, and the best answer is a strip that has been on screen the whole
- * time showing per-source last-success times, the selected persistence driver,
- * and which credentials are dormant.
- *
- * It reports failure honestly. A source that has never succeeded says so, in
- * amber, rather than being omitted to keep the row green.
+ * Prototype layout: brand + live sources count, then the primary tool tabs,
+ * then the provenance ledger. Infrastructure chips (store / cache / fences)
+ * stay out of the chrome so the strip stays about what the user can do.
  */
 
-import { useState } from 'react';
-import { Activity, ChevronDown, Cpu, Database, Layers, Zap } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { Activity, ChevronDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { FreshnessReport, Health } from '@/lib/types';
 import { relativeAge } from '@/lib/api';
@@ -25,50 +21,15 @@ const STATUS_STYLES: Record<string, { dot: string; text: string; label: string }
   dormant: { dot: 'bg-ink-3', text: 'text-ink-2', label: 'dormant' },
 };
 
-function Chip({
-  icon: Icon,
-  label,
-  value,
-  tone = 'default',
-  title,
-}: {
-  icon: typeof Cpu;
-  label: string;
-  value: string;
-  tone?: 'default' | 'good' | 'warn';
-  title?: string;
-}) {
-  return (
-    <div
-      className="flex items-center gap-1.5 whitespace-nowrap"
-      title={title ?? `${label}: ${value}`}
-    >
-      <Icon
-        className={clsx(
-          'h-3 w-3 shrink-0',
-          tone === 'good' ? 'text-jade' : tone === 'warn' ? 'text-amber' : 'text-ink-2',
-        )}
-        aria-hidden
-      />
-      <span className="label">{label}</span>
-      <span
-        className={clsx(
-          'data text-2xs',
-          tone === 'good' ? 'text-jade' : tone === 'warn' ? 'text-amber' : 'text-ink-0',
-        )}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
 export function FreshnessStrip({
   health,
   freshness,
+  tools,
 }: {
   health: Health | null;
   freshness: FreshnessReport | null;
+  /** Primary tool tabs (Look / Intel / SAR / Passage / Sea view). */
+  tools?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -78,65 +39,48 @@ export function FreshnessStrip({
   const broken = active.filter((r) => r.status === 'failing' || r.status === 'circuit_open').length;
   const dormant = rows.filter((r) => r.status === 'dormant');
 
-  const capabilities = health?.capabilities ?? {};
-  const dormantCaps = Object.entries(capabilities)
-    .filter(([, v]) => !v)
-    .map(([k]) => k);
-
   return (
     <div className="glass border-hairline relative z-30 border-b">
-      <div className="flex items-center gap-4 px-3 py-1.5">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 px-3 py-1.5">
+        <div className="flex shrink-0 items-center gap-2">
           <span className="data text-cyan text-sm font-bold tracking-[0.18em]">ORCA</span>
           <span className="text-ink-3 font-mono text-2xs">v{health?.version ?? '—'}</span>
         </div>
 
-        <div className="bg-hairline h-4 w-px" />
+        <div className="bg-hairline h-4 w-px shrink-0" />
 
-        <div className="scrollbar-none flex items-center gap-4 overflow-x-auto">
-          <Chip
-            icon={Activity}
-            label="sources"
-            value={`${healthy}/${active.length}`}
-            tone={broken > 0 ? 'warn' : healthy > 0 ? 'good' : 'default'}
-            title={
-              broken > 0
-                ? `${broken} source(s) failing. ORCA degrades that layer and still answers.`
-                : `${healthy} of ${active.length} active sources succeeded on their last attempt.`
-            }
+        <div
+          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap"
+          title={
+            broken > 0
+              ? `${broken} source(s) failing. ORCA degrades that layer and still answers.`
+              : `${healthy} of ${active.length} active sources succeeded on their last attempt.`
+          }
+        >
+          <Activity
+            className={clsx(
+              'h-3 w-3 shrink-0',
+              broken > 0 ? 'text-amber' : healthy > 0 ? 'text-jade' : 'text-ink-2',
+            )}
+            aria-hidden
           />
-          <Chip
-            icon={Database}
-            label="store"
-            value={health?.infrastructure.db ?? '—'}
-            tone={health?.infrastructure.db === 'postgis' ? 'good' : 'default'}
-            title={
-              health?.infrastructure.db === 'postgis'
-                ? 'PostGIS with pgvector. Spatial predicates run in the database.'
-                : 'SQLite with a shapely STRtree. ORCA runs with no infrastructure at all.'
-            }
-          />
-          <Chip
-            icon={Zap}
-            label="cache"
-            value={health?.infrastructure.cache ?? '—'}
-            tone={health?.infrastructure.cache === 'redis' ? 'good' : 'default'}
-          />
-          <Chip
-            icon={Layers}
-            label="fences"
-            value={health?.infrastructure.geofence_index === 'postgis' ? 'gist' : 'strtree'}
-          />
-          {dormantCaps.length > 0 && (
-            <Chip
-              icon={Cpu}
-              label="dormant"
-              value={String(dormantCaps.length)}
-              tone="warn"
-              title={`Adapters written, credentials not supplied: ${dormantCaps.join(', ')}`}
-            />
-          )}
+          <span className="label">sources</span>
+          <span
+            className={clsx(
+              'data text-2xs',
+              broken > 0 ? 'text-amber' : healthy > 0 ? 'text-jade' : 'text-ink-0',
+            )}
+          >
+            {healthy}/{active.length}
+          </span>
         </div>
+
+        {tools && (
+          <>
+            <div className="bg-hairline h-4 w-px shrink-0" />
+            <div className="scrollbar-none min-w-0 flex-1 overflow-x-auto">{tools}</div>
+          </>
+        )}
 
         <button
           type="button"
@@ -145,7 +89,10 @@ export function FreshnessStrip({
           aria-expanded={open}
         >
           <span className="label">provenance ledger</span>
-          <ChevronDown className={clsx('h-3 w-3 transition-transform', open && 'rotate-180')} aria-hidden />
+          <ChevronDown
+            className={clsx('h-3 w-3 transition-transform', open && 'rotate-180')}
+            aria-hidden
+          />
         </button>
       </div>
 

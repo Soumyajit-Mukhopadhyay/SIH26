@@ -24,7 +24,12 @@ import pytest
 
 from orca.provenance import Evidence, Freshness, Provenance, Provider, utcnow
 from orca.services import risk_engine
-from orca.services.risk_engine import assess, assess_from_evidence, cape_to_lightning_pct
+from orca.services.risk_engine import (
+    assess,
+    assess_from_evidence,
+    cape_to_lightning_pct,
+    classify_cape,
+)
 from orca.services.thresholds import BOAT_CLASSES, THRESHOLDS_VERSION, by_code, classify
 
 
@@ -111,7 +116,8 @@ class TestVerdictBoundaries:
             wave_m=1.49, wind_kn=5.0, visibility_km=10.0, lightning_pct=0.0, loa_m=8.2
         ).vetoes
 
-    def test_lightning_vetoes_regardless_of_boat_size(self):
+    def test_high_cape_proxy_does_not_hard_veto(self):
+        """CAPE / legacy pct may lower the blended score but must not alone NO-GO."""
         for boat in BOAT_CLASSES:
             result = assess(
                 wave_m=0.2,
@@ -120,7 +126,11 @@ class TestVerdictBoundaries:
                 lightning_pct=75.0,
                 loa_m=boat.loa_min_m + 0.5,
             )
-            assert result.verdict == "NO-GO", f"{boat.code} should be vetoed by lightning"
+            assert result.verdict != "NO-GO" or not result.vetoes, (
+                f"{boat.code}: CAPE/legacy pct must not produce a hard veto"
+            )
+            assert not any("convective" in v.lower() or "lightning" in v.lower() for v in result.vetoes)
+            assert result.verdict in ("GO", "CAUTION")
 
     def test_the_same_conditions_can_be_go_for_a_trawler_and_no_go_for_a_canoe(self):
         conditions = {
@@ -138,7 +148,9 @@ class TestVerdictBoundaries:
 class TestRefusalToGuess:
     def test_missing_wave_data_is_unverifiable_not_calm(self):
         # The whole point: "we could not measure it" must never render as safe.
-        result = assess(wave_m=None, wind_kn=8.0, visibility_km=10.0, lightning_pct=0.0)
+        result = assess(
+            wave_m=None, wind_kn=8.0, visibility_km=10.0, lightning_pct=0.0, loa_m=8.2
+        )
         assert result.verdict == "UNVERIFIABLE"
         assert result.escalate is True
         assert "wave height" in result.escalation_message
@@ -150,13 +162,14 @@ class TestRefusalToGuess:
             visibility_km=10.0,
             lightning_pct=0.0,
             data_age_hours=9.0,
+            loa_m=8.2,
         )
         assert result.confidence == "low"
         assert result.escalate is True
         assert "9.0 h old" in result.escalation_message
 
     def test_escalation_tells_the_user_where_to_go_instead(self):
-        result = assess(wave_m=None, wind_kn=None, visibility_km=None)
+        result = assess(wave_m=None, wind_kn=None, visibility_km=None, loa_m=8.2)
         assert "fisheries office" in result.escalation_message
         assert "VHF" in result.escalation_message
 
@@ -175,6 +188,7 @@ class TestRefusalToGuess:
             wind_kn=8.0,
             visibility_km=10.0,
             lightning_pct=0.0,
+            loa_m=8.2,
             evidence=[simulated],
         )
         assert result.confidence == "low"
@@ -182,22 +196,90 @@ class TestRefusalToGuess:
         assert "SIMULATED" in result.escalation_message
 
 
-class TestCapeProxy:
+class TestCapeBands:
     @pytest.mark.parametrize(
         ("cape", "expected"),
-        [(0, 0.0), (300, 0.0), (2500, 100.0), (4000, 100.0)],
+        [
+            (0, "LOW"),
+            (499, "LOW"),
+            (500, "MODERATE"),
+            (999, "MODERATE"),
+            (1000, "ELEVATED"),
+            (1499, "ELEVATED"),
+            (1500, "HIGH"),
+            (1600, "HIGH"),
+            (2500, "HIGH"),
+            (2501, "VERY_HIGH"),
+            (3000, "VERY_HIGH"),
+            (4000, "VERY_HIGH"),
+        ],
     )
-    def test_endpoints(self, cape, expected):
-        assert cape_to_lightning_pct(cape) == expected
+    def test_classify_cape_bands(self, cape, expected):
+        assert classify_cape(cape) == expected
 
-    def test_midrange_is_monotonic(self):
-        values = [cape_to_lightning_pct(c) for c in (400, 900, 1400, 2000, 2400)]
-        assert values == sorted(values)
+    def test_cape_around_1000_is_elevated(self):
+        assert classify_cape(1000) == "ELEVATED"
+        assert classify_cape(999) == "MODERATE"
 
-    def test_strong_instability_vetoes(self):
-        result = assess(wave_m=0.3, wind_kn=6.0, visibility_km=10.0, cape_j_kg=3000.0, loa_m=8.2)
+    def test_cape_1600_does_not_auto_nogo(self):
+        result = assess(wave_m=0.3, wind_kn=6.0, visibility_km=10.0, cape_j_kg=1600.0, loa_m=8.2)
+        assert result.verdict != "NO-GO"
+        assert result.vetoes == []
+        lightning = next(c for c in result.components if c.name == "lightning")
+        assert lightning.band == "HIGH"
+        assert lightning.unit == "J/kg"
+        assert lightning.exceeded is False
+
+    def test_cape_2500_plus_very_high_but_not_auto_nogo(self):
+        for cape in (2500.0, 2501.0, 3000.0, 4000.0):
+            result = assess(wave_m=0.3, wind_kn=6.0, visibility_km=10.0, cape_j_kg=cape, loa_m=8.2)
+            lightning = next(c for c in result.components if c.name == "lightning")
+            if cape <= 2500:
+                assert lightning.band == "HIGH"
+            else:
+                assert lightning.band == "VERY_HIGH"
+            assert result.verdict != "NO-GO"
+            assert result.vetoes == []
+            assert lightning.exceeded is False
+
+    def test_wave_hard_veto_still_nogo(self):
+        result = assess(wave_m=2.0, wind_kn=6.0, visibility_km=10.0, cape_j_kg=100.0, loa_m=8.2)
         assert result.verdict == "NO-GO"
-        assert any("lightning" in v for v in result.vetoes)
+        assert any("Hs" in v for v in result.vetoes)
+
+    def test_wind_hard_veto_still_nogo(self):
+        result = assess(wave_m=0.3, wind_kn=30.0, visibility_km=10.0, cape_j_kg=100.0, loa_m=8.2)
+        assert result.verdict == "NO-GO"
+        assert any("wind" in v for v in result.vetoes)
+
+    def test_visibility_hard_veto_still_nogo(self):
+        result = assess(wave_m=0.3, wind_kn=6.0, visibility_km=0.2, cape_j_kg=100.0, loa_m=8.2)
+        assert result.verdict == "NO-GO"
+        assert any("visibility" in v for v in result.vetoes)
+
+    def test_missing_cape_is_not_a_clearance(self):
+        result = assess(wave_m=0.3, wind_kn=6.0, visibility_km=10.0, loa_m=8.2)
+        assert result.verdict == "UNVERIFIABLE"
+        assert result.escalate is True
+        assert "CAPE" in (result.escalation_message or "")
+
+    def test_strong_instability_does_not_veto(self):
+        result = assess(wave_m=0.3, wind_kn=6.0, visibility_km=10.0, cape_j_kg=3000.0, loa_m=8.2)
+        assert result.verdict in ("GO", "CAUTION")
+        assert result.vetoes == []
+        lightning = next(c for c in result.components if c.name == "lightning")
+        assert lightning.band == "VERY_HIGH"
+        assert lightning.value == 3000.0
+
+
+class TestCapeProxy:
+    """Deprecated shim retained for callers; must not drive verdicts."""
+
+    def test_shim_is_monotonic_with_instability(self):
+        from orca.services.risk_engine import cape_to_lightning_pct
+
+        values = [cape_to_lightning_pct(c) for c in (100, 600, 1200, 1800, 3000)]
+        assert values == sorted(values)
 
 
 class TestEvidenceIntegration:

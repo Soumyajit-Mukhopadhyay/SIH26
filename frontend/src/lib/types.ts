@@ -85,6 +85,8 @@ export interface RiskComponent {
   /** The actual arithmetic, shown in the UI. */
   formula: string;
   exceeded: boolean;
+  /** Qualitative CAPE band when name is lightning and CAPE was assessed. */
+  band?: string | null;
 }
 
 export interface RiskResult {
@@ -96,7 +98,10 @@ export interface RiskResult {
   components: RiskComponent[];
   boat_class_code: string;
   boat_class_label: string;
-  loa_m: number;
+  /** Null when the vessel was unknown and no LOA was supplied. */
+  loa_m: number | null;
+  /** How the vessel was resolved: category chip, LOA match, or unknown. */
+  vessel_source?: 'category' | 'loa' | 'unknown';
   confidence: 'high' | 'low';
   escalate: boolean;
   escalation_message: string | null;
@@ -107,6 +112,26 @@ export interface RiskResult {
   citations: Citation[];
   what_would_change_it: string[];
   disclaimer: string;
+  /** Phase 3 — parallel models (ORCA_LEGACY 0-100 + optional INCOIS BSI 0-7). */
+  environmental_models?: EnvironmentalModel[];
+}
+
+export interface EnvironmentalModel {
+  model: string;
+  score: number | null;
+  scale: string;
+  verdict?: string | null;
+  completeness?: string;
+  hazard?: string;
+  partial_contribution?: number;
+  components?: Array<Record<string, unknown>>;
+  beam_criterion?: Record<string, unknown> | null;
+  limitations?: string[];
+  notes?: string;
+  scientific_status?: string;
+  source?: string;
+  source_url?: string;
+  disclaimer?: string;
 }
 
 export interface SeriesPoint {
@@ -132,6 +157,22 @@ export interface Landmark {
   lat: number;
   lon: number;
   label: string;
+}
+
+export interface GeocodeResult {
+  name: string;
+  address: string;
+  lat: number;
+  lon: number;
+  provider: string;
+}
+
+export interface GeocodeSearchResponse {
+  results: GeocodeResult[];
+  provider: string;
+  ok: boolean;
+  cached?: boolean;
+  error?: string;
 }
 
 export interface SourceRow {
@@ -377,7 +418,9 @@ export interface ThresholdTable {
   policy: {
     thresholds_version: string;
     lightning_veto_pct: number;
+    cape_hard_veto?: boolean;
     cape_veto_j_kg: number;
+    cape_bands_j_kg?: Record<string, string>;
     confidence_age_limit_h: number;
     weights: Record<string, number>;
     citations: Citation[];
@@ -586,6 +629,8 @@ export interface RoutePlan {
   ok: boolean;
   router_version: string;
   boat_class: string;
+  /** True when neither category nor LOA was supplied — route refused honestly. */
+  vessel_unknown?: boolean;
   thresholds_version?: string | null;
   lattice: {
     step_deg: number;

@@ -102,7 +102,12 @@ export function SeaStatePanel({
   const periodS = numeric(forecast, 'wave_period');
   const directionFromDeg = numeric(forecast, 'wave_direction');
   const windSpeedKn = numeric(forecast, 'wind_speed') ?? 0;
-  const limitM = boatClass?.max_wave_m ?? 1.5;
+  // Only a resolved class supplies a real safety limit. Never invent 1.5 m.
+  const classLimitM = boatClass?.max_wave_m;
+  // Visual depth scaling for the shader when no class is known — not a claim.
+  const limitM = classLimitM ?? Math.max(waveHeightM ?? 2, 2);
+  const overLimit =
+    classLimitM !== undefined && waveHeightM !== null && waveHeightM >= classLimitM;
 
   const missing = [
     waveHeightM === null && 'significant wave height',
@@ -119,7 +124,6 @@ export function SeaStatePanel({
   );
 
   const model = useMemo(() => (inputs ? seaStateFrom(inputs) : null), [inputs]);
-  const overLimit = waveHeightM !== null && waveHeightM >= limitM;
 
   if (!open) {
     return (
@@ -160,7 +164,7 @@ export function SeaStatePanel({
         <span className="label">Sea view</span>
         {model && viewMode === 'forecast' && (
           <span className="data text-ink-3 text-2xs">
-            {model.wavelength.toFixed(0)} m wavelength · {loaM} m hull
+            {model.wavelength.toFixed(0)} m wavelength
           </span>
         )}
         {viewMode !== 'forecast' && (
@@ -227,18 +231,20 @@ export function SeaStatePanel({
             <SeaStateScene inputs={inputs} />
 
             {/* The limit, called out on the canvas, because an amber plane with
-                no label is decoration. */}
+                no label is decoration. Only shown when a class limit is known. */}
             <div className="pointer-events-none absolute top-2 left-2 space-y-1">
-              <div className="bg-abyss-0/70 rounded px-1.5 py-0.5 backdrop-blur-sm">
-                <span className="text-amber text-2xs">
-                  amber plane · red contour = {limitM.toFixed(1)} m limit
-                  {boatClass ? ` · ${boatClass.label}` : ''}
-                </span>
-              </div>
-              {overLimit && (
+              {boatClass && classLimitM !== undefined && (
+                <div className="bg-abyss-0/70 rounded px-1.5 py-0.5 backdrop-blur-sm">
+                  <span className="text-amber text-2xs">
+                    amber plane · red contour = {classLimitM.toFixed(1)} m limit
+                    {` · ${boatClass.label}`}
+                  </span>
+                </div>
+              )}
+              {overLimit && classLimitM !== undefined && (
                 <div className="bg-red/20 border-red/40 rounded border px-1.5 py-0.5 backdrop-blur-sm">
                   <span className="text-red text-2xs">
-                    the red contour is your {limitM.toFixed(1)} m limit — this is the veto
+                    the red contour is your {classLimitM.toFixed(1)} m limit — this is the veto
                   </span>
                 </div>
               )}

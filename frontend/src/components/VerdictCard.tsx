@@ -77,7 +77,7 @@ const COMPONENT_LABELS: Record<RiskComponent['name'], string> = {
   wave: 'Significant wave height',
   wind: 'Wind speed',
   visibility: 'Visibility',
-  lightning: 'Convective-risk proxy',
+  lightning: 'Convective conditions',
 };
 
 function limitText(component: RiskComponent): string {
@@ -85,7 +85,7 @@ function limitText(component: RiskComponent): string {
     return `minimum ${component.limit} ${component.unit}`;
   }
   if (component.name === 'lightning') {
-    return `hard veto at ${component.limit}${component.unit}`;
+    return 'instability indicator';
   }
   return `limit ${component.limit} ${component.unit}`;
 }
@@ -94,7 +94,7 @@ function CurrentConditions({ result, landPoint = false }: { result: RiskResult; 
   const capeEvidence = result.evidence.find(
     (item) => item.variable === 'convective_energy' && typeof item.value === 'number',
   );
-  const cape = typeof capeEvidence?.value === 'number' ? capeEvidence.value : null;
+  const capeFromEvidence = typeof capeEvidence?.value === 'number' ? capeEvidence.value : null;
   const components = landPoint
     ? result.components.filter((component) => component.name !== 'wave')
     : result.components;
@@ -112,67 +112,92 @@ function CurrentConditions({ result, landPoint = false }: { result: RiskResult; 
         )}
       </div>
       <div className="grid grid-cols-2 gap-2">
-        {components.map((component) => (
-          <div
-            key={component.name}
-            className={clsx(
-              'rounded border px-2.5 py-2',
-              !landPoint && component.exceeded
-                ? 'border-red/35 bg-red/8'
-                : component.value === null
-                  ? 'border-amber/25 bg-amber/5'
-                  : 'border-hairline bg-abyss-0/35',
-            )}
-          >
-            <div className="text-ink-2 truncate text-2xs uppercase tracking-[0.08em]">
-              {COMPONENT_LABELS[component.name]}
-            </div>
-            <div className="mt-0.5 flex items-baseline justify-between gap-1.5">
-              <span
-                className={clsx(
-                  'data text-sm font-semibold',
-                  !landPoint && component.exceeded
-                    ? 'text-red'
-                    : component.value === null
-                      ? 'text-amber'
-                      : 'text-ink-0',
-                )}
-              >
-                {component.value === null ? 'NO DATA' : `${component.value} ${component.unit}`}
-              </span>
-              <span
-                className={clsx(
-                  'shrink-0 text-[9px] font-semibold uppercase',
-                  !landPoint && component.exceeded ? 'text-red' : 'text-jade',
-                )}
-              >
-                {component.value === null
-                  ? 'unverified'
-                  : landPoint
-                    ? 'observed'
-                    : component.exceeded
-                    ? 'limit exceeded'
-                    : 'within limit'}
-              </span>
-            </div>
-            <p className="text-ink-3 mt-1 text-[10px] leading-snug">
-              {landPoint ? (
-                component.name === 'lightning' && cape !== null ? (
-                  <>Derived from CAPE {cape} J/kg; not a detected lightning strike</>
-                ) : (
-                  <>Atmospheric value at the selected land grid cell</>
-                )
-              ) : (
-                <>
-                  Safety score {component.score.toFixed(0)}/100; {limitText(component)}
-                  {component.name === 'lightning' && cape !== null
-                    ? `; derived from CAPE ${cape} J/kg, not a detected strike`
-                    : ''}
-                </>
+        {components.map((component) => {
+          const isCape =
+            component.name === 'lightning' &&
+            (component.band != null || component.unit === 'J/kg');
+          const capeValue =
+            isCape && component.unit === 'J/kg' && component.value !== null
+              ? component.value
+              : capeFromEvidence;
+          const band = component.band ?? null;
+          const showExceeded = !landPoint && !isCape && component.exceeded;
+
+          return (
+            <div
+              key={component.name}
+              className={clsx(
+                'rounded border px-2.5 py-2',
+                showExceeded
+                  ? 'border-red/35 bg-red/8'
+                  : component.value === null
+                    ? 'border-amber/25 bg-amber/5'
+                    : isCape && (band === 'HIGH' || band === 'VERY_HIGH')
+                      ? 'border-amber/30 bg-amber/8'
+                      : 'border-hairline bg-abyss-0/35',
               )}
-            </p>
-          </div>
-        ))}
+            >
+              <div className="text-ink-2 truncate text-2xs uppercase tracking-[0.08em]">
+                {COMPONENT_LABELS[component.name]}
+              </div>
+              <div className="mt-0.5 flex items-baseline justify-between gap-1.5">
+                <span
+                  className={clsx(
+                    'data text-sm font-semibold',
+                    showExceeded
+                      ? 'text-red'
+                      : component.value === null
+                        ? 'text-amber'
+                        : isCape && (band === 'HIGH' || band === 'VERY_HIGH')
+                          ? 'text-amber'
+                          : 'text-ink-0',
+                  )}
+                >
+                  {component.value === null
+                    ? 'NO DATA'
+                    : isCape && band
+                      ? band.replaceAll('_', ' ')
+                      : `${component.value} ${component.unit}`}
+                </span>
+                <span
+                  className={clsx(
+                    'shrink-0 text-[9px] font-semibold uppercase',
+                    showExceeded
+                      ? 'text-red'
+                      : isCape
+                        ? 'text-ink-2'
+                        : 'text-jade',
+                  )}
+                >
+                  {component.value === null
+                    ? 'unverified'
+                    : landPoint
+                      ? 'observed'
+                      : isCape
+                        ? 'indicator'
+                        : component.exceeded
+                          ? 'limit exceeded'
+                          : 'within limit'}
+                </span>
+              </div>
+              <p className="text-ink-3 mt-1 text-[10px] leading-snug">
+                {isCape ? (
+                  capeValue !== null ? (
+                    <>CAPE {capeValue} J/kg · not lightning</>
+                  ) : (
+                    <>Instability indicator · not lightning</>
+                  )
+                ) : landPoint ? (
+                  <>Atmospheric value at the selected land grid cell</>
+                ) : (
+                  <>
+                    Safety score {component.score.toFixed(0)}/100; {limitText(component)}
+                  </>
+                )}
+              </p>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

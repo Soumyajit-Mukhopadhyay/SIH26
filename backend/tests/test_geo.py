@@ -27,6 +27,7 @@ from orca.services.geo import (
     destination,
     geodesic_km,
     geodesic_m,
+    nearest_on_polygon_m,
     path_length_m,
     time_to_cross_minutes,
 )
@@ -216,3 +217,32 @@ class TestGridConstruction:
         grid = Grid(west=70.0, east=80.0, south=5.0, north=15.0, step=0.1)
         assert grid.shape == (100, 100)
         assert grid.lats[0] == pytest.approx(14.95)
+
+
+class TestNearestOnPolygon:
+    """PFZ distance must be to the nearest edge, not the polygon centre."""
+
+    # ~1° square around Chennai waters (lon, lat) GeoJSON order.
+    RING = [
+        [80.0, 12.0],
+        [81.0, 12.0],
+        [81.0, 13.0],
+        [80.0, 13.0],
+        [80.0, 12.0],
+    ]
+
+    def test_outside_uses_nearest_edge_not_centroid(self):
+        # Due west of the west edge; centroid is ~80.5/12.5.
+        dist_m, near_lat, near_lon, inside = nearest_on_polygon_m(12.5, 79.5, self.RING)
+        assert inside is False
+        centroid_m = geodesic_m(12.5, 79.5, 12.5, 80.5)
+        assert dist_m < centroid_m
+        assert near_lon == pytest.approx(80.0, abs=0.02)
+        assert near_lat == pytest.approx(12.5, abs=0.05)
+
+    def test_inside_reports_zero(self):
+        dist_m, near_lat, near_lon, inside = nearest_on_polygon_m(12.5, 80.5, self.RING)
+        assert inside is True
+        assert dist_m == 0.0
+        assert near_lat == pytest.approx(12.5)
+        assert near_lon == pytest.approx(80.5)

@@ -143,14 +143,21 @@ export function useAlerts() {
 
   /** Register a position to be monitored. */
   const watch = useCallback(
-    async (args: { lat: number; lon: number; loaM: number; label?: string | null }) => {
+    async (args: {
+      lat: number;
+      lon: number;
+      boatClassCode?: string | null;
+      loaM?: number | null;
+      label?: string | null;
+    }) => {
       const response = await fetch('/api/alerts/watch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           lat: args.lat,
           lon: args.lon,
-          loa_m: args.loaM,
+          ...(args.loaM != null ? { loa_m: args.loaM } : {}),
+          ...(args.boatClassCode != null ? { boat_class_code: args.boatClassCode } : {}),
           label: args.label,
         }),
       });
@@ -174,16 +181,29 @@ export function useAlerts() {
    * Keep a watch's position and vessel in step with the console.
    *
    * Without this a watch keeps judging the boat it was registered with. A skipper
-   * who moves the vessel slider from a 22 m trawler to an 8.2 m FRP boat would go
-   * on getting alerts computed against the trawler's 2.5 m limit — advice about a
+   * who switches from a large mechanised trawler to a small motorised boat would go
+   * on getting alerts computed against the trawler's limit — advice about a
    * boat they are no longer in.
    */
   const retarget = useCallback(
-    async (id: string, args: { lat?: number; lon?: number; loaM?: number }) => {
+    async (
+      id: string,
+      args: {
+        lat?: number;
+        lon?: number;
+        loaM?: number | null;
+        boatClassCode?: string | null;
+      },
+    ) => {
       await fetch(`/api/alerts/watch/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat: args.lat, lon: args.lon, loa_m: args.loaM }),
+        body: JSON.stringify({
+          lat: args.lat,
+          lon: args.lon,
+          ...(args.loaM != null ? { loa_m: args.loaM } : {}),
+          ...(args.boatClassCode != null ? { boat_class_code: args.boatClassCode } : {}),
+        }),
       });
     },
     [],

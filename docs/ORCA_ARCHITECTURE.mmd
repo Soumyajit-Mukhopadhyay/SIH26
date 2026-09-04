@@ -1,0 +1,100 @@
+%% ORCA — master architecture diagram (implementation as of feature/operational-intelligence-adapters)
+%% Source of truth: backend/orca + frontend/src. Open in any Mermaid renderer.
+%% Companion document: docs/ORCA_SYSTEM_FLOW.md
+
+flowchart TB
+  %% ========== INPUT ==========
+  UQ["USER QUERY<br/>text / voice"]
+  FE["FRONTEND<br/>App.tsx · ChatPanel · OceanMap<br/>MapLibre + deck.gl + Three.js"]
+  UQ --> FE
+
+  %% ========== API ==========
+  API["FastAPI<br/>orca.main:create_app<br/>/agent/stream SSE · /risk/assess · /route/plan<br/>/rasters/* · /pfz/* · /geofence/* · /sar/*"]
+  FE -->|"POST /agent/stream<br/>{question,lat,lon,loa_m,reply_language,speak}"| API
+  FE -->|"POST /risk/assess · GET /forecast/point"| API
+
+  %% ========== AGENT GRAPH ==========
+  subgraph LG["LangGraph StateGraph — agents/graph.py"]
+    direction TB
+    INT["interaction<br/>multiquery.decompose"]
+    PLN["planner<br/>LLM → JSON tool plan"]
+    EXE["execute<br/>run_tool sequential"]
+    VIS["visualisation<br/>deterministic ui_spec"]
+    REP["reporting<br/>LLM or structured/deterministic"]
+    CRT["critic<br/>mechanical checks · NO LLM"]
+    INT --> PLN --> EXE --> VIS --> REP --> CRT
+    CRT -->|"critic_verdict == revise<br/>(max 2 rounds)"| REP
+    CRT -->|"approve | escalate"| OUT["final SSE payload<br/>answer · risk · evidence · ui_spec"]
+  end
+  API --> INT
+
+  %% ========== TOOLS ==========
+  subgraph TOOLS["agents/tools.py — 18 tools"]
+    T1["fetch_marine_conditions"]
+    T2["assess_risk / assess_forecast_risk"]
+    T3["find_fishing_zones / screen_fishing_zones"]
+    T4["plan_route"]
+    T5["check_geofences"]
+    T6["fetch_satellite_sst · tides · AIS · GFW · overpass · …"]
+  end
+  EXE --> TOOLS
+
+  %% ========== SERVICES ==========
+  subgraph SVC["services/ — DETERMINISTIC CORE · no agents imports"]
+    RE["risk_engine.assess<br/>GO/CAUTION/NO-GO/UNVERIFIABLE"]
+    RT["router.plan · A* lattice"]
+    GF["geofence.GeofenceIndex"]
+    DR["drift.simulate · Monte Carlo SAR"]
+    CV["cross_validation · overpass · cap_builder"]
+  end
+  T2 --> RE
+  T4 --> RT
+  T5 --> GF
+  API --> RE
+  API --> RT
+  API --> DR
+
+  %% ========== SCIENCE ==========
+  subgraph SCI["science/"]
+    PFZ["pfz.derive · fronts · grid · colormap · vectorfield"]
+  end
+  ING["jobs/ingest.run_ingest"] --> PFZ
+  PFZ --> RAST["data/rasters/*.png + *.json"]
+  T3 --> RAST
+
+  %% ========== SOURCES ==========
+  subgraph SRC["sources/ adapters"]
+    OM["open_meteo · LIVE"]
+    ER["erddap · MUR SST / chl"]
+    MR["marine_regions · CURATED fences"]
+    OP["ais · gfw · worldtides · cmems<br/>nasa · gibs · sentinel · celestrak"]
+  end
+  TOOLS --> SRC
+  RE --> OM
+  RT --> OM
+  ING --> ER
+  ING --> OM
+  GF --> MR
+
+  %% ========== PROVENANCE ==========
+  PROV["provenance.Evidence<br/>LIVE|CACHED|CURATED|DERIVED|SIMULATED|UNAVAILABLE"]
+  SRC --> PROV
+  PROV --> EXE
+  PROV --> REP
+  PROV --> CRT
+
+  %% ========== STORAGE ==========
+  subgraph STOR["Persistence (actual)"]
+    MEM["in-process TTL · HTTP ETag · sample cache"]
+    FS["SQLite path configured · agent.sqlite unused for runs<br/>rasters/ · static/fences.geojson · cache/*.nc"]
+    OPT["Redis / PostGIS · probed at startup · fallback if absent"]
+  end
+  SRC --> MEM
+  ING --> FS
+  API --> OPT
+
+  %% ========== OUTPUT ==========
+  OUT --> FE
+  FE --> MAP["Map layers · VerdictCard · EvidencePanel<br/>RoutePanel · SarPanel · LocalisedAnswer"]
+  OUT --> LLM2["optional translate + TTS<br/>language/"]
+  LLM2 --> FE

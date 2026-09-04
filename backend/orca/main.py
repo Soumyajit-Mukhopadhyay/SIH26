@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from orca.api.routes import agent as agent_routes
 from orca.api.routes import alerts as alert_routes
 from orca.api.routes import forecast as forecast_routes
+from orca.api.routes import geocode as geocode_routes
 from orca.api.routes import geofence as geofence_routes
 from orca.api.routes import health as health_routes
 from orca.api.routes import imagery as imagery_routes
@@ -255,6 +256,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_routes.router)
     app.include_router(forecast_routes.router)
+    app.include_router(geocode_routes.router)
     app.include_router(agent_routes.router)
     app.include_router(raster_routes.router)
     app.include_router(imagery_routes.router)

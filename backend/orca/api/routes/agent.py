@@ -49,7 +49,9 @@ class AgentRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1200)
     lat: Lat
     lon: Lon
-    loa_m: float = Field(default=8.2, gt=0, le=200)
+    #: Optional. Precedence: boat_class_code > loa_m > UNKNOWN.
+    loa_m: float | None = Field(default=None, gt=0, le=200)
+    boat_class_code: str | None = None
     place: str | None = None
     locale: str = "en"
     thread_id: str | None = Field(
@@ -92,6 +94,7 @@ async def agent_stream(request: AgentRequest) -> StreamingResponse:
                     lat=request.lat,
                     lon=request.lon,
                     loa_m=request.loa_m,
+                    boat_class_code=request.boat_class_code,
                     place=request.place,
                     locale=request.locale,
                 ):

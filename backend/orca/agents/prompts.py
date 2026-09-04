@@ -26,6 +26,16 @@ ABSOLUTE RULES — these are enforced by code, not just requested:
    tool results you were given. If you do not have a value, say you do not.
 4. You always state that ORCA supplements, never replaces, official IMD and
    INCOIS bulletins.
+5. DECISION HIERARCHY — six dimensions are independent. You may NOT collapse
+   them into a single judgment or let one override another:
+   - A PFZ opportunity does NOT grant safety clearance or legal permission.
+   - A GO environmental verdict does NOT imply legal permission to fish.
+   - An UNKNOWN official status means "cannot verify" — never say "no warning".
+   - An UNKNOWN legal status means "indeterminate" — never say "permitted".
+   - PROCEED means no blocking condition was found in the available evidence,
+     not that venturing is guaranteed safe or legally cleared.
+6. If the STRUCTURED DECISION is provided, your prose MUST reflect it faithfully.
+   You explain it — you do not alter it.
 """
 
 PLANNER_SYSTEM = f"""\
@@ -72,13 +82,28 @@ Reply with ONLY a JSON object, no prose and no code fence:
 {_SAFETY_CONTRACT}"""
 
 
+def _vessel_context(*, loa_m: float | None, boat_class_code: str | None) -> str:
+    if boat_class_code:
+        extra = f", optional LOA {loa_m} m" if loa_m is not None else ""
+        return f"vessel category {boat_class_code}{extra}"
+    if loa_m is not None:
+        return f"vessel length overall {loa_m} m"
+    return "vessel type UNKNOWN (do not invent a class or LOA)"
+
+
 def planner_user(
-    *, question: str, tools: list[dict[str, Any]], lat: float, lon: float, loa_m: float
+    *,
+    question: str,
+    tools: list[dict[str, Any]],
+    lat: float,
+    lon: float,
+    loa_m: float | None = None,
+    boat_class_code: str | None = None,
 ) -> str:
     return f"""\
 QUESTION: {question}
 
-CONTEXT: position {lat:.3f}N {lon:.3f}E, vessel length overall {loa_m} m.
+CONTEXT: position {lat:.3f}N {lon:.3f}E, {_vessel_context(loa_m=loa_m, boat_class_code=boat_class_code)}.
 
 TOOL CATALOGUE:
 {json.dumps(tools, indent=2)}
@@ -109,8 +134,9 @@ Style:
   `[1]`. Never invent a source or URL.
 
 Question-specific truth rules:
-- CAPE is a thunderstorm-potential proxy. Never call a CAPE-derived percentage
-  a detected lightning strike, an official lightning probability or an alert.
+- CAPE is an atmospheric-instability / thunderstorm-potential indicator. Never
+  call CAPE a detected lightning strike, an official lightning probability, a
+  marine hard limit, or an automatic NO-GO reason by itself.
 - A failed official-alert check means "cannot verify", not "there is no alert".
 - When official alert access is unavailable, say "ORCA cannot verify whether a
   warning exists"; do not say "there are no confirmed warnings".
@@ -127,6 +153,26 @@ Question-specific truth rules:
 - IMD warning products do not support tide timing. If tide access is unavailable,
   say to use a trusted local tide source; do not invent "IMD tide tables".
 
+Phase 2 decision-hierarchy rules (enforced by the critic):
+- If STRUCTURED DECISION is provided, lead with FINAL ACTION plainly stated.
+- official_status UNKNOWN → say "ORCA cannot verify official warnings", never
+  say "no warning detected" or imply the coast is clear from official sources.
+- legal_status UNKNOWN → say "legal status is indeterminate", never say
+  "fishing is permitted" or "no restriction applies".
+- legal_status PROHIBITED → say fishing is prohibited, never soften it.
+- fishing_opportunity HIGH → you may report it as a scientific opportunity, but
+  you MUST make clear it does not grant safety clearance or legal permission.
+- final_action DO_NOT_PROCEED → do not use phrases like "you can proceed" or
+  "safe to head out", even if some conditions look favourable.
+- When an INCOIS SVAS / BSI hazard indicator is present in environmental_models:
+  explain which model was used, the 0–7 scale (not a percentage), which
+  components triggered or are unavailable, and limitations. Say
+  "Based on the INCOIS SVAS-derived indicator…" only for verified equations.
+  Never claim ORCA is INCOIS-certified or that BSI is a legal decision.
+  Never convert BSI into an arbitrary 0–100 percentage.
+  Never invent missing BSI inputs (directional spread, wind-sea pair, beam).
+  The GO/CAUTION/NO-GO verdict still comes from ORCA_LEGACY unless stated.
+
 {_SAFETY_CONTRACT}"""
 
 
@@ -136,12 +182,17 @@ def reporting_user(
     results: list[dict[str, Any]],
     risk: dict[str, Any] | None,
     place: str | None,
-    loa_m: float,
+    loa_m: float | None = None,
+    boat_class_code: str | None = None,
+    structured_decision: dict[str, Any] | None = None,
     revision_note: str | None = None,
     sub_questions: list[str] | None = None,
     references: list[dict[str, Any]] | None = None,
 ) -> str:
-    sections = [f"QUESTION: {question}", f"VESSEL: {loa_m} m length overall"]
+    sections = [
+        f"QUESTION: {question}",
+        f"VESSEL: {_vessel_context(loa_m=loa_m, boat_class_code=boat_class_code)}",
+    ]
     if sub_questions and len(sub_questions) > 1:
         numbered = "\n".join(f"  {i + 1}. {q}" for i, q in enumerate(sub_questions))
         sections.append(
@@ -163,12 +214,13 @@ def reporting_user(
                     "components": [
                         {
                             "name": (
-                                "CAPE-derived convective-risk proxy"
+                                "CAPE convective conditions"
                                 if c["name"] == "lightning"
                                 else c["name"]
                             ),
                             "value": c["value"],
                             "unit": c["unit"],
+                            "band": c.get("band"),
                             "limit": c["limit"],
                             "exceeded": c["exceeded"],
                         }
@@ -180,6 +232,7 @@ def reporting_user(
                     "boat_class": risk["boat_class_label"],
                     "thresholds_version": risk["thresholds_version"],
                     "forecast_window": risk.get("forecast_window"),
+                    "environmental_models": risk.get("environmental_models") or [],
                     "cape_j_kg": next(
                         (
                             item.get("value")
@@ -191,6 +244,46 @@ def reporting_user(
                 },
                 indent=2,
             )
+        )
+
+    if structured_decision:
+        final_action = (structured_decision.get("final_status") or {}).get(
+            "action", "UNVERIFIABLE"
+        )
+        reason_codes = (structured_decision.get("final_status") or {}).get(
+            "reason_codes", []
+        )
+        sections.append(
+            "STRUCTURED DECISION (authoritative — six independent dimensions, "
+            "you explain this, you do not alter it):\n"
+            + json.dumps(
+                {
+                    "final_action": final_action,
+                    "reason_codes": reason_codes,
+                    "official_status": structured_decision.get("official_status"),
+                    "legal_status": structured_decision.get("legal_status"),
+                    "geographic_status": structured_decision.get("geographic_status"),
+                    "environmental_status": {
+                        "verdict": (
+                            structured_decision.get("environmental_status") or {}
+                        ).get("verdict"),
+                    },
+                    "fishing_opportunity": {
+                        "status": (
+                            structured_decision.get("fishing_opportunity") or {}
+                        ).get("status"),
+                        "stale": (
+                            structured_decision.get("fishing_opportunity") or {}
+                        ).get("stale"),
+                    },
+                    "data_status": structured_decision.get("data_status"),
+                },
+                indent=2,
+            )
+            + "\n\nIMPORTANT: PROCEED means no blocking condition was found in available "
+            "evidence — it does not mean 'safe' or 'legally guaranteed'. "
+            "Where official_status or legal_status is UNKNOWN, preserve that uncertainty "
+            "explicitly in your answer."
         )
 
     sections.append(

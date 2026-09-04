@@ -7,8 +7,7 @@
  * geometry — "fishing there without a Sri Lanka licence risks arrest" is the
  * thing worth knowing, not the name of a treaty line.
  *
- * The heading control exists because time-to-cross is meaningless without one.
- * With no heading set, the panel says distance only and does not invent a
+ * Without a heading, the panel reports distance only and does not invent a
  * crossing time.
  */
 
@@ -17,14 +16,11 @@ import {
   Compass,
   Eye,
   EyeOff,
-  FileText,
-  Gauge,
   Landmark,
   ShieldAlert,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { GeofenceCheck, Proximity } from '@/lib/types';
-import { ProvenanceBadge } from './ProvenanceBadge';
 
 const STATE_STYLES: Record<string, { text: string; label: string; bg: string }> = {
   inside: { text: 'text-jade', label: 'inside', bg: 'bg-jade/10' },
@@ -42,8 +38,27 @@ function interval(minutes: number): string {
   return `${(hours / 24).toFixed(1)} days`;
 }
 
+function lineFenceLabel(state: Proximity['state']): { text: string; label: string } {
+  // A treaty / 200 NM line has no interior. "Outside" on those rows never
+  // flipped and looked broken. Distance is the fact; this is just the side.
+  if (state === 'approaching') return { text: 'text-amber', label: 'near' };
+  if (state === 'crossed' || state === 'exited') return { text: 'text-red', label: state };
+  if (state === 'inside') return { text: 'text-jade', label: 'india side' };
+  return { text: 'text-ink-2', label: 'clear' };
+}
+
+function displayName(proximity: Proximity): string {
+  if (proximity.kind === 'imbl' && proximity.name.includes(' - ')) {
+    return `${proximity.name.replace(' - ', '–')} boundary`;
+  }
+  return proximity.name;
+}
+
 function FenceRow({ proximity }: { proximity: Proximity }) {
-  const style = STATE_STYLES[proximity.state] ?? STATE_STYLES.outside;
+  const isLine = proximity.kind === 'imbl' || proximity.kind === 'eez_outer';
+  const style = isLine
+    ? { ...STATE_STYLES[proximity.state], ...lineFenceLabel(proximity.state) }
+    : (STATE_STYLES[proximity.state] ?? STATE_STYLES.outside);
   const urgent = proximity.state === 'crossed' || proximity.state === 'exited';
   const soon = proximity.time_to_cross_min !== null && proximity.time_to_cross_min < 60;
 
@@ -65,7 +80,13 @@ function FenceRow({ proximity }: { proximity: Proximity }) {
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="text-ink-0 truncate text-xs">{proximity.name}</span>
+            <span className="text-ink-0 truncate text-xs" title={
+              proximity.kind === 'imbl'
+                ? 'One treaty line. The two country names are the parties, not a travel direction.'
+                : proximity.name
+            }>
+              {displayName(proximity)}
+            </span>
             <span className={clsx('data shrink-0 text-2xs uppercase', style.text)}>
               {style.label}
             </span>
@@ -98,8 +119,6 @@ function FenceRow({ proximity }: { proximity: Proximity }) {
           {(urgent || soon || proximity.state === 'approaching') && proximity.consequence && (
             <p className="text-ink-1 mt-1.5 text-2xs leading-snug">{proximity.consequence}</p>
           )}
-
-          <p className="text-ink-3 mt-1 text-2xs leading-snug italic">{proximity.authority}</p>
         </div>
       </div>
     </div>
@@ -108,20 +127,10 @@ function FenceRow({ proximity }: { proximity: Proximity }) {
 
 export function BoundaryPanel({
   check,
-  heading,
-  speed,
-  onHeading,
-  onSpeed,
-  capUrl,
   visible,
   onToggleVisible,
 }: {
   check: GeofenceCheck | null;
-  heading: number | null;
-  speed: number;
-  onHeading: (value: number | null) => void;
-  onSpeed: (value: number) => void;
-  capUrl: string | null;
   visible: boolean;
   onToggleVisible: () => void;
 }) {
@@ -131,7 +140,6 @@ export function BoundaryPanel({
         <Compass className="text-cyan h-3.5 w-3.5" aria-hidden />
         <span className="label">Maritime boundaries</span>
         <div className="ml-auto flex items-center gap-2">
-          {check && <ProvenanceBadge provenance={check.provenance} size="xs" />}
           <button
             type="button"
             onClick={onToggleVisible}
@@ -146,68 +154,6 @@ export function BoundaryPanel({
             )}
           </button>
         </div>
-      </div>
-
-      {/* Heading and speed. Time-to-cross is meaningless without them, so the
-          control sits here rather than in a settings panel. */}
-      <div className="border-hairline space-y-2 border-b px-3 py-2">
-        <div>
-          <div className="mb-1 flex items-center justify-between">
-            <span className="label flex items-center gap-1">
-              <Compass className="h-2.5 w-2.5" aria-hidden />
-              Heading
-            </span>
-            <span className="data text-ink-1 text-2xs">
-              {heading === null ? 'not set' : `${heading.toFixed(0)}°`}
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={359}
-            step={1}
-            value={heading ?? 0}
-            onChange={(event) => onHeading(Number(event.target.value))}
-            className="accent-cyan w-full"
-            aria-label="True heading in degrees"
-          />
-          {heading !== null && (
-            <button
-              type="button"
-              onClick={() => onHeading(null)}
-              className="text-ink-3 hover:text-ink-1 mt-0.5 text-2xs transition-colors"
-            >
-              clear heading
-            </button>
-          )}
-        </div>
-
-        <div>
-          <div className="mb-1 flex items-center justify-between">
-            <span className="label flex items-center gap-1">
-              <Gauge className="h-2.5 w-2.5" aria-hidden />
-              Speed
-            </span>
-            <span className="data text-ink-1 text-2xs">{speed.toFixed(1)} kn</span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={25}
-            step={0.5}
-            value={speed}
-            onChange={(event) => onSpeed(Number(event.target.value))}
-            className="accent-cyan w-full"
-            aria-label="Speed over ground in knots"
-          />
-        </div>
-
-        {heading === null && (
-          <p className="text-ink-3 text-2xs leading-snug">
-            Set a heading to get time-to-cross. Without one ORCA reports distance only rather
-            than inventing a crossing time.
-          </p>
-        )}
       </div>
 
       <div className="max-h-64 space-y-1.5 overflow-y-auto p-2">
@@ -241,24 +187,6 @@ export function BoundaryPanel({
           </p>
         )}
       </div>
-
-      {capUrl && (
-        <div className="border-hairline border-t px-3 py-2">
-          <a
-            href={capUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-ink-2 hover:text-cyan flex items-center gap-1.5 text-2xs transition-colors"
-          >
-            <FileText className="h-3 w-3" aria-hidden />
-            Download this advisory as CAP 1.2 XML
-          </a>
-          <p className="text-ink-3 mt-1 text-2xs leading-snug">
-            The OASIS standard NDMA SACHET and IMD publish in, so an ORCA advisory can be
-            consumed by systems that already exist.
-          </p>
-        </div>
-      )}
     </div>
   );
 }
