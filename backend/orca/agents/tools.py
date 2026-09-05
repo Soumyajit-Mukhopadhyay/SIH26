@@ -38,6 +38,7 @@ from orca.sources import open_meteo
 from orca.sources.ais import aisstream
 from orca.sources.erddap import DATASETS, erddap
 from orca.sources.gfw import gfw
+from orca.sources.imd import alerts_at as imd_alerts_at
 from orca.sources.worldtides import worldtides
 
 log = logging.getLogger(__name__)
@@ -225,39 +226,8 @@ async def _assess_forecast_risk(
 
 
 async def _check_marine_alerts(lat: float, lon: float, **_: Any) -> ToolResult:
-    """Official-alert status, kept separate from CAPE-based potential."""
-    from orca.config import get_settings
-
-    settings = get_settings()
-    imd_url = "https://api.imd.gov.in/public/api_reference.html"
-    reason = (
-        "IMD_API_KEY is not configured, so official IMD lightning, cyclone and fishermen "
-        "warnings cannot be verified in this deployment."
-        if not settings.has_imd
-        else "The IMD credential is configured, but the alert adapter is not enabled in this build."
-    )
-    unavailable = [
-        Evidence(
-            dataset_id="imd.api",
-            provider=Provider.IMD,
-            variable=variable,
-            value=None,
-            unit=None,
-            provenance=Provenance.UNAVAILABLE,
-            freshness=Freshness.static(),
-            url=imd_url,
-            location=(lon, lat),
-            citations=[
-                Citation(
-                    label="IMD API — marine, cyclone and lightning products",
-                    provider=Provider.IMD,
-                    url=imd_url,
-                )
-            ],
-            notes=reason,
-        )
-        for variable in ("lightning_alert", "cyclone_alert")
-    ]
+    """Official IMD warning status, kept separate from CAPE-based potential."""
+    alerts = await imd_alerts_at(lat, lon)
     cape_values = await open_meteo.forecast.at(
         lat, lon, variables=["convective_energy"]
     )
@@ -268,20 +238,39 @@ async def _check_marine_alerts(lat: float, lon: float, **_: Any) -> ToolResult:
         if cape is not None and cape.value is not None
         else " No CAPE context was available either."
     )
+    active = [
+        name
+        for name, value in (
+            ("cyclone", alerts.cyclone_alert),
+            ("fishermen", alerts.fishermen_warning),
+            ("port", alerts.port_warning),
+            ("sea-area", alerts.sea_area_warning),
+            ("lightning", alerts.lightning_alert),
+        )
+        if value not in (None, "none", "unavailable", "")
+    ]
+    if alerts.verified and active:
+        summary = (
+            "Official IMD warning in force: " + "; ".join(active) + "."
+            f" {alerts.reason}"
+        )
+    elif alerts.verified:
+        summary = (
+            "Official IMD warning feeds were checked; no cyclone, fishermen, port "
+            "or lightning warning is in force for this point."
+        )
+    else:
+        summary = alerts.reason
+    data = alerts.as_tool_data()
+    data["cape_j_kg"] = None if cape is None else cape.value
+    data["cape_is_alert"] = False
     return ToolResult(
-        ok=False,
+        ok=alerts.verified,
         tool="check_marine_alerts",
-        summary=reason + cape_text,
-        evidence=[*unavailable, *([cape] if cape is not None else [])],
-        data={
-            "official_alerts_verified": False,
-            "lightning_alert": "unavailable",
-            "cyclone_alert": "unavailable",
-            "cape_j_kg": None if cape is None else cape.value,
-            "cape_is_alert": False,
-            "reason": reason,
-        },
-        error=reason,
+        summary=summary + cape_text,
+        evidence=[*alerts.evidence, *([cape] if cape is not None else [])],
+        data=data,
+        error=None if alerts.verified else alerts.reason,
     )
 
 
@@ -1094,7 +1083,8 @@ TOOLS: dict[str, Tool] = {
     "check_marine_alerts": Tool(
         name="check_marine_alerts",
         description=(
-            "Check whether official IMD lightning/cyclone warnings can be verified. CAPE is "
+            "Check official IMD fishermen, port, cyclone and lightning warnings "
+            "(CAP RSS always; keyed JSON when IMD_API_KEY is set). CAPE is "
             "reported separately as potential and is never presented as an alert."
         ),
         capability=Capability(
@@ -1103,8 +1093,8 @@ TOOLS: dict[str, Tool] = {
             latency_ms=1000,
             provenance="live",
             cost=2,
-            coverage="India; authoritative verification requires IMD API access",
-            decision_grade=False,
+            coverage="India; CAP RSS always, keyed JSON when IMD_API_KEY is registered",
+            decision_grade=True,
         ),
         run=_check_marine_alerts,
         owner="weather",

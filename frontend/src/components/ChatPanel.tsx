@@ -50,6 +50,12 @@ import { inline, stripBullet } from '@/lib/markdown';
  */
 const SHOW_AGENT_TRACE = false;
 
+const SUGGESTIONS = [
+  'Is it safe to go out tomorrow morning?',
+  'Any official IMD fishermen or cyclone warning here?',
+  'Where is the nearest potential fishing zone?',
+];
+
 const WORKING_MESSAGES = [
   'Searching coastal data…',
   'Working on your question…',
@@ -57,12 +63,6 @@ const WORKING_MESSAGES = [
   'Gathering verified evidence…',
 ];
 
-const SUGGESTIONS = [
-  'Is it safe to go out tomorrow morning?',
-  'Where is the water warmest near here?',
-  'What are the wave limits for my boat, and who says so?',
-  'Where does your data actually come from?',
-];
 
 function WorkingMotion() {
   const [index, setIndex] = useState(0);
@@ -87,7 +87,7 @@ function WorkingMotion() {
           <Search className="text-cyan h-3.5 w-3.5 animate-pulse" aria-hidden />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="label text-cyan mb-1">ORCA is working</div>
+          <div className="label text-cyan mb-1">MitraAI is working</div>
           <p
             key={index}
             className="text-ink-1 text-xs leading-snug"
@@ -385,7 +385,7 @@ export function ChatPanel({
     <div className="flex h-full flex-col">
       <div className="border-hairline flex items-center gap-1.5 border-b px-3 py-2">
         <MessageSquare className="text-cyan h-3.5 w-3.5" aria-hidden />
-        <span className="label">Ask ORCA</span>
+        <span className="label">MitraAI</span>
         <div className="ml-auto flex min-w-0 items-center gap-2">
           {run.running && (
             <button
@@ -401,7 +401,7 @@ export function ChatPanel({
             type="button"
             onClick={onClose}
             className="text-ink-2 hover:bg-abyss-2/70 hover:text-cyan rounded p-1 transition-colors"
-            aria-label="Close Ask ORCA chat"
+            aria-label="Close MitraAI chat"
             title="Close chat to a floating AI button"
           >
             <X className="h-3.5 w-3.5" aria-hidden />
@@ -412,9 +412,21 @@ export function ChatPanel({
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {run.events.length === 0 && !run.final && !run.running && (
           <div className="space-y-3">
-            <p className="text-ink-2 text-xs leading-relaxed">
-              Ask in plain language. ORCA will choose the right tools, calculate a verified
-              safety verdict where needed, and answer about the place you selected on the map.
+            <p
+              className="text-ink-0 flex items-center gap-1.5 text-sm"
+              style={{ animation: 'orca-rise 420ms var(--ease-out-instrument)' }}
+            >
+              Welcome back, sir
+              <span
+                className="inline-block text-base leading-none"
+                style={{
+                  transformOrigin: '70% 70%',
+                  animation: 'orca-wave 2.4s ease-in-out infinite',
+                }}
+                aria-hidden
+              >
+                👋
+              </span>
             </p>
             {!disabled && (
               <div className="space-y-1">
@@ -433,7 +445,7 @@ export function ChatPanel({
             )}
             {disabled && (
               <p className="text-amber text-xs leading-snug">
-                Pick a point on the map first — ORCA answers about a place, not in the abstract.
+                Pick a point on the map first — MitraAI answers about a place, not in the abstract.
               </p>
             )}
           </div>

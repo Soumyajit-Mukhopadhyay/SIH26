@@ -9,7 +9,7 @@
 import { useState, type ReactNode } from 'react';
 import { Activity, ChevronDown } from 'lucide-react';
 import { clsx } from 'clsx';
-import type { FreshnessReport, Health } from '@/lib/types';
+import type { FreshnessReport } from '@/lib/types';
 import { relativeAge } from '@/lib/api';
 
 const STATUS_STYLES: Record<string, { dot: string; text: string; label: string }> = {
@@ -22,11 +22,9 @@ const STATUS_STYLES: Record<string, { dot: string; text: string; label: string }
 };
 
 export function FreshnessStrip({
-  health,
   freshness,
   tools,
 }: {
-  health: Health | null;
   freshness: FreshnessReport | null;
   /** Primary tool tabs (Look / Intel / SAR / Passage / Sea view). */
   tools?: ReactNode;
@@ -44,7 +42,6 @@ export function FreshnessStrip({
       <div className="flex items-center gap-3 px-3 py-1.5">
         <div className="flex shrink-0 items-center gap-2">
           <span className="data text-cyan text-sm font-bold tracking-[0.18em]">ORCA</span>
-          <span className="text-ink-3 font-mono text-2xs">v{health?.version ?? '—'}</span>
         </div>
 
         <div className="bg-hairline h-4 w-px shrink-0" />

@@ -101,24 +101,63 @@ def _pfz_tool(rank: int, stale: bool = False) -> dict[str, Any]:
 
 
 def test_01_official_emergency_env_go_no_proceed():
-    """Scenario 1: Official emergency + environmental GO → DO_NOT_PROCEED.
-
-    Current adapter is always unavailable (UNKNOWN), so this test also
-    verifies the cascade once a future adapter fires.  We exercise by directly
-    calling the sub-function to confirm the emergency path works.
-    """
+    """Scenario 1: Official cyclone warning + environmental GO → DO_NOT_PROCEED."""
     from orca.services.decision import _official_from_alert_data
 
-    # Simulated future-adapter result
     future_data = {
         "official_alerts_verified": True,
         "cyclone_alert": "CYCLONE WARNING: Severe cyclonic storm Bay of Bengal",
-        "lightning_alert": "unavailable",
+        "lightning_alert": "none",
+        "fishermen_warning": "none",
         "reason": "",
     }
-    result = _official_from_alert_data(future_data)
-    assert result["status"] == "WARNING"
-    assert any("cyclone" in item.lower() for item in result["items"])
+    mapped = _official_from_alert_data(future_data)
+    assert mapped["status"] == "WARNING"
+    assert any("cyclone" in item.lower() for item in mapped["items"])
+
+    result = resolve_decision(
+        [{"tool": "check_marine_alerts", "data": future_data}],
+        risk=_risk("GO"),
+    )
+    assert result["official_status"]["status"] == "WARNING"
+    assert result["final_status"]["action"] == "DO_NOT_PROCEED"
+
+
+def test_fishermen_warning_blocks_proceed():
+    data = {
+        "official_alerts_verified": True,
+        "cyclone_alert": "none",
+        "lightning_alert": "none",
+        "fishermen_warning": "Fishermen are advised not to venture into the sea",
+        "port_warning": "none",
+    }
+    result = resolve_decision(
+        [{"tool": "check_marine_alerts", "data": data}],
+        risk=_risk("GO"),
+    )
+    assert result["official_status"]["status"] == "WARNING"
+    assert result["final_status"]["action"] == "DO_NOT_PROCEED"
+    assert any("Fishermen" in item for item in result["official_status"]["items"])
+
+
+def test_verified_clear_official_feed_is_none_not_unknown():
+    data = {
+        "official_alerts_verified": True,
+        "cyclone_alert": "none",
+        "lightning_alert": "none",
+        "fishermen_warning": "none",
+        "port_warning": "none",
+        "sea_area_warning": "none",
+        "coastal_warning": "none",
+        "rainfall_advisory": "none",
+    }
+    result = resolve_decision(
+        [{"tool": "check_marine_alerts", "data": data}],
+        risk=_risk("GO"),
+    )
+    assert result["official_status"]["status"] == "NONE"
+    assert result["final_status"]["action"] == "PROCEED"
+    assert "OFFICIAL_STATUS_UNKNOWN" not in result["final_status"]["reason_codes"]
 
 
 def test_02_official_warning_pfz_high_do_not_proceed_pfz_preserved():

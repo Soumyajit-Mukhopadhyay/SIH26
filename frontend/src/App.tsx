@@ -960,7 +960,6 @@ export default function App() {
       )}
       <TreatmentFilters />
       <FreshnessStrip
-        health={health}
         freshness={freshness}
         tools={
           <div
@@ -1325,8 +1324,8 @@ export default function App() {
               'glass border-cyan/40 text-cyan hover:border-cyan/70 hover:bg-cyan/10 pointer-events-auto absolute bottom-4 z-30 flex h-12 w-12 items-center justify-center rounded-full border shadow-[0_0_28px_-8px_rgba(34,211,238,0.7)] transition-[left,color] duration-200',
               leftRailOpen ? 'left-[17.5rem]' : 'left-3',
             )}
-            aria-label="Open Ask ORCA chat"
-            title="Open Ask ORCA chat"
+            aria-label="Open MitraAI chat"
+            title="Open MitraAI chat"
           >
             <Bot className="h-5 w-5" aria-hidden />
             {agentRun.running && (

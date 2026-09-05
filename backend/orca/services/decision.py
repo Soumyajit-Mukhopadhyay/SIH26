@@ -41,10 +41,10 @@ FinalAction = Literal["PROCEED", "CAUTION", "DO_NOT_PROCEED", "UNVERIFIABLE"]
 def _official_from_alert_data(alert_data: dict[str, Any] | None) -> dict[str, Any]:
     """Map ``check_marine_alerts`` tool data → ``official_status`` dict.
 
-    The alert adapter is unavailable in the current deployment.  That is an
-    honest UNKNOWN, not a clean "no warning".  If a future adapter populates
-    ``official_alerts_verified=True`` and real alert fields, the cascade below
-    will correctly categorise them.
+    Unverified feeds stay UNKNOWN — never a silent all-clear. When the IMD
+    adapter marks ``official_alerts_verified=True``, cyclone / fishermen / port
+    warnings are WARNING (or EMERGENCY for a severe cyclone) and lightning or
+    coastal rainfall is ADVISORY.
     """
     if alert_data is None:
         return {
@@ -62,18 +62,52 @@ def _official_from_alert_data(alert_data: dict[str, Any] | None) -> dict[str, An
             "items": [f"Official alert verification unavailable: {reason}"],
         }
 
-    # Adapter is live — parse real alert fields.
+    def _active(value: Any) -> bool:
+        if value is None:
+            return False
+        return str(value).strip().lower() not in ("unavailable", "none", "false", "", "nil")
+
     cyclone = alert_data.get("cyclone_alert")
     lightning = alert_data.get("lightning_alert")
+    fishermen = alert_data.get("fishermen_warning")
+    port = alert_data.get("port_warning")
+    sea = alert_data.get("sea_area_warning")
+    coastal = alert_data.get("coastal_warning")
+    rainfall = alert_data.get("rainfall_advisory")
     items: list[str] = []
     severity: OfficialStatusCode = "NONE"
 
-    if cyclone and str(cyclone).lower() not in ("unavailable", "none", "false", ""):
+    if _active(cyclone):
         items.append(f"Cyclone alert: {cyclone}")
-        severity = "WARNING"
-    if lightning and str(lightning).lower() not in ("unavailable", "none", "false", ""):
+        blob = str(cyclone).lower()
+        severity = (
+            "EMERGENCY"
+            if any(token in blob for token in ("very severe", "super cyclone", "extremely severe"))
+            else "WARNING"
+        )
+    if _active(fishermen):
+        items.append(f"Fishermen warning: {fishermen}")
+        if severity not in ("WARNING", "EMERGENCY"):
+            severity = "WARNING"
+    if _active(port):
+        items.append(f"Port warning: {port}")
+        if severity not in ("WARNING", "EMERGENCY"):
+            severity = "WARNING"
+    if _active(sea):
+        items.append(f"Sea-area bulletin: {sea}")
+        if severity not in ("WARNING", "EMERGENCY"):
+            severity = "WARNING"
+    if _active(coastal):
+        items.append(f"Coastal bulletin: {coastal}")
+        if severity not in ("WARNING", "EMERGENCY"):
+            severity = "WARNING"
+    if _active(lightning):
         items.append(f"Lightning alert: {lightning}")
         if severity not in ("WARNING", "EMERGENCY"):
+            severity = "ADVISORY"
+    if _active(rainfall):
+        items.append(f"Coastal rainfall advisory: {rainfall}")
+        if severity not in ("WARNING", "EMERGENCY", "ADVISORY"):
             severity = "ADVISORY"
 
     return {"status": severity, "items": items}
