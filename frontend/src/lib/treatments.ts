@@ -36,9 +36,7 @@ export type TreatmentId =
   | 'thermal'
   | 'night-vision'
   | 'radar'
-  | 'bathymetric'
-  | 'crt'
-  | 'noir';
+  | 'bathymetric';
 
 export interface Treatment {
   id: TreatmentId;
@@ -104,34 +102,8 @@ export const TREATMENTS: Treatment[] = [
   {
     id: 'bathymetric',
     label: 'Bathymetric',
-    blurb: 'Use this to read the sea in simple depth bands.',
+    blurb: 'Use this to see the map as stepped blue bands.',
     filter: 'url(#orca-bathymetric)',
-    distortsData: true,
-    cost: 2,
-  },
-  {
-    id: 'crt',
-    label: 'CRT',
-    blurb: 'Use this for a harbour office monitor look.',
-    filter: 'url(#orca-crt)',
-    overlay: {
-      backgroundImage:
-        'repeating-linear-gradient(to bottom, rgba(0,0,0,0.34) 0 1px, rgba(0,0,0,0) 1px 3px)',
-      mixBlendMode: 'multiply',
-    },
-    distortsData: true,
-    cost: 2,
-  },
-  {
-    id: 'noir',
-    label: 'Noir',
-    blurb: 'Use this when colour is a distraction and you only need the shape of the coast.',
-    filter: 'url(#orca-noir)',
-    overlay: {
-      background:
-        'radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(0,0,0,0.5) 85%, rgba(0,0,0,0.78) 100%)',
-      mixBlendMode: 'multiply',
-    },
     distortsData: true,
     cost: 2,
   },

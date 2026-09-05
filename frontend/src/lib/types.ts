@@ -434,9 +434,7 @@ export type Treatment =
   | 'thermal'
   | 'night-vision'
   | 'radar'
-  | 'bathymetric'
-  | 'crt'
-  | 'noir';
+  | 'bathymetric';
 
 // ---------------------------------------------------------------- rasters
 

@@ -10,7 +10,7 @@
  * is on screen.
  */
 
-import { Eye, Gauge, Palette, TriangleAlert } from 'lucide-react';
+import { Eye, Gauge, Palette } from 'lucide-react';
 import { clsx } from 'clsx';
 import { TREATMENTS, type TreatmentId } from '@/lib/treatments';
 
@@ -103,20 +103,6 @@ export function TreatmentRail({
           );
         })}
       </div>
-
-      {current.distortsData && (
-        <div className="border-hairline border-t px-3 py-2">
-          <p className="text-amber flex items-start gap-1 text-2xs leading-snug">
-            <TriangleAlert className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
-            <span>
-              <span className="font-semibold">Layer legends do not apply.</span> ORCA's raster
-              colours are generated from the same lookup tables as the legends, so a colour means a
-              value. This treatment recolours them, so the legends are hidden until you return to
-              Standard.
-            </span>
-          </p>
-        </div>
-      )}
 
       {degradedReason && (
         <div className="border-hairline border-t px-3 py-2">
