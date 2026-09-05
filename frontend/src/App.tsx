@@ -43,7 +43,6 @@ import type {
   GeofenceCheck,
   PfzZonesResponse,
   RasterCatalogue,
-  Health,
   Landmark,
   PointForecast,
   RiskResult,
@@ -152,7 +151,6 @@ export default function App() {
   const mapRef = useRef<OceanMapHandle>(null);
   const pointQueryEpoch = useRef(0);
 
-  const [health, setHealth] = useState<Health | null>(null);
   const [freshness, setFreshness] = useState<FreshnessReport | null>(null);
   const [landmarks, setLandmarks] = useState<Landmark[]>([]);
   const [thresholds, setThresholds] = useState<ThresholdTable | null>(null);
@@ -286,7 +284,6 @@ export default function App() {
         api.landmarks(),
         api.thresholds(),
       ]);
-      if (h.status === 'fulfilled') setHealth(h.value);
       if (f.status === 'fulfilled') setFreshness(f.value);
       if (l.status === 'fulfilled') setLandmarks(l.value.landmarks);
       if (t.status === 'fulfilled') setThresholds(t.value);
@@ -444,7 +441,7 @@ export default function App() {
       setLoading(false);
       setError(
         `${lat.toFixed(3)}°N ${lon.toFixed(3)}°E is on land. ` +
-          'A marine route destination must be placed on water.',
+        'A marine route destination must be placed on water.',
       );
       return true;
     },
@@ -522,10 +519,10 @@ export default function App() {
     () =>
       flowMeta?.bounds && flowMeta.encoding
         ? {
-            bounds: flowMeta.bounds,
-            maxAbs: flowMeta.encoding.max_abs,
-            particleSpeed: flowMeta.particle_speed ?? 0.4,
-          }
+          bounds: flowMeta.bounds,
+          maxAbs: flowMeta.encoding.max_abs,
+          particleSpeed: flowMeta.particle_speed ?? 0.4,
+        }
         : null,
     [flowMeta],
   );
@@ -1144,19 +1141,19 @@ export default function App() {
             layers={layers}
             onViewChange={syncLookOrigin}
             onClick={(lon, lat, surface) => {
-            // While picking a destination the click sets the endpoint and does
-            // NOT move the selection: re-running the point forecast would throw
-            // away the origin the user is planning from.
-            if (pickingDestination) {
-              if (rejectLandDestination(lon, lat, surface)) return;
-              setError(null);
-              setRouteDestination({ lat, lon });
-              setPickingDestination(false);
-              setRoutePlan(null);
-              return;
-            }
-            void query(lon, lat, undefined, surface);
-          }}
+              // While picking a destination the click sets the endpoint and does
+              // NOT move the selection: re-running the point forecast would throw
+              // away the origin the user is planning from.
+              if (pickingDestination) {
+                if (rejectLandDestination(lon, lat, surface)) return;
+                setError(null);
+                setRouteDestination({ lat, lon });
+                setPickingDestination(false);
+                setRoutePlan(null);
+                return;
+              }
+              void query(lon, lat, undefined, surface);
+            }}
             className="absolute inset-0"
           />
           {lookOverlay && (
