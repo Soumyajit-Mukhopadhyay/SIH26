@@ -1,11 +1,11 @@
-﻿{
+{
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://YOUR-BACKEND.onrender.com/:path*"
+      "destination": "https://sih26-4sno.onrender.com/:path*"
     },
     {
       "source": "/(.*)",
