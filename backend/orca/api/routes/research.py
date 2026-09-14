@@ -293,6 +293,65 @@ async def federation_preview(
     )
 
 
+# ------------------------------------------------------------ ground truth
+
+
+@router.get("/research/insitu/buoys", summary="Moored buoys reporting in a box")
+async def insitu_buoys(
+    west: float = Query(default=60.0),
+    south: float = Query(default=0.0),
+    east: float = Query(default=100.0),
+    north: float = Query(default=25.0),
+) -> dict[str, Any]:
+    """Where the physical thermometers actually are.
+
+    Worth showing on a map because the sparsity is the point: thirteen RAMA
+    stations exist inside the Indian EEZ and, measured on 2026-09-14, one had
+    reported in the previous four months.
+    """
+    from orca.sources import insitu
+
+    stations = await insitu.buoys_in_box(west, south, east, north)
+    return {
+        "bbox": [west, south, east, north],
+        "reporting": len(stations),
+        "stations": stations,
+        "note": (
+            "NOAA PMEL's RAMA array — the Indian Ocean arm of the global tropical moored buoy "
+            "network. These are thermometers in the water, the only ground truth ORCA has. The "
+            "array runs about a month behind, so it validates a product's track record rather "
+            "than today's field."
+        ),
+    }
+
+
+@router.get("/research/insitu/validate-sst", summary="Satellite SST against a real thermometer")
+async def insitu_validate(
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    days: int = Query(default=30, ge=5, le=180),
+) -> dict[str, Any]:
+    """Compare ORCA's satellite SST against the nearest moored buoy, day by day.
+
+    The honest answer to "how do you know your numbers are right?". Every other
+    cross-check in ORCA compares one inference with another; this one compares an
+    inference with a measurement.
+    """
+    from orca.sources import insitu
+
+    result = await insitu.validate_sst_against_buoy(lat, lon, days=days)
+    if result is None:
+        return {
+            "validated": False,
+            "reason": (
+                "No moored buoy has reported near this position recently. Over most of the "
+                "Indian EEZ that is the normal case rather than a fault — the array is sparse "
+                "and much of it is currently silent."
+            ),
+        }
+    return {"validated": True, **result.describe()}
+
+
 # ---------------------------------------------------------------- the models
 
 

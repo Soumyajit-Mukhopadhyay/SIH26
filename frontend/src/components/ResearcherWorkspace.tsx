@@ -40,6 +40,7 @@ import {
   Loader2,
   Search,
   Sparkles,
+  Thermometer,
   X,
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -116,6 +117,23 @@ interface DiscoverResult {
   federated: Federated | null;
   snippet: string | null;
   note: string;
+}
+
+interface BuoyValidation {
+  validated: boolean;
+  reason?: string;
+  station?: string;
+  lat?: number;
+  lon?: number;
+  matched_pairs?: number;
+  days_requested?: number;
+  bias_degc?: number | null;
+  rmse_degc?: number | null;
+  max_abs_error_degc?: number | null;
+  buoy_mean_degc?: number | null;
+  product_mean_degc?: number | null;
+  product?: string;
+  note?: string;
 }
 
 interface ModelStatus {
@@ -516,6 +534,139 @@ function ModelCard({ status }: { status: ModelStatus | null }) {
   );
 }
 
+/* ------------------------------------------------------------ ground truth */
+
+/**
+ * Satellite against thermometer.
+ *
+ * This is the answer to the hardest question anyone can ask ORCA: how do you
+ * know your numbers are right? Every other cross-check in the system compares
+ * one inference with another — a model against a satellite analysis — and can
+ * only ever show that they agree. A moored buoy is an instrument in the water.
+ *
+ * The lag is stated up front rather than buried, because it decides what the
+ * number means: the array runs about a month behind, so this validates the
+ * product's track record and not today's field.
+ */
+function GroundTruth() {
+  const [place, setPlace] = useState({ lat: 15, lon: 89, label: 'Bay of Bengal (15°N 90°E)' });
+  const [result, setResult] = useState<BuoyValidation | null>(null);
+  const [stations, setStations] = useState<{ station: string; lat: number; lon: number; sst_degc: number; observed_at: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void fetch('/api/research/insitu/buoys?west=60&south=0&east=100&north=25')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setStations(d.stations ?? []))
+      .catch(() => {});
+  }, []);
+
+  const run = useCallback(async (lat: number, lon: number) => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await fetch(`/api/research/insitu/validate-sst?lat=${lat}&lon=${lon}&days=30`);
+      setResult(await r.json());
+    } catch {
+      setResult({ validated: false, reason: 'The validation request failed.' });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void run(place.lat, place.lon);
+  }, [place, run]);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="flex items-center gap-1.5">
+          <Thermometer className="text-jade h-3.5 w-3.5" aria-hidden />
+          <span className="text-ink-0 text-xs font-semibold">Satellite against a thermometer</span>
+        </div>
+        <p className="text-ink-1 mt-1 max-w-3xl text-2xs leading-relaxed">
+          Every other cross-check in ORCA compares one inference with another — a model against a
+          satellite analysis — and can only ever show that they <em>agree</em>. NOAA PMEL&rsquo;s
+          RAMA moored buoys are instruments in the water. This compares ORCA&rsquo;s satellite SST
+          against one, day by day.
+        </p>
+        <p className="text-amber mt-1.5 max-w-3xl text-2xs leading-relaxed">
+          The array runs about a month behind, so this validates the product&rsquo;s{' '}
+          <span className="font-semibold">track record</span>, not today&rsquo;s field. And it is
+          sparse: 13 stations exist inside the Indian EEZ and {stations.length} reported in the last
+          four months.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {stations.map((s) => (
+          <button
+            key={s.station}
+            type="button"
+            onClick={() => setPlace({ lat: s.lat, lon: s.lon, label: `${s.station} (${s.lat}°N ${s.lon}°E)` })}
+            className="border-hairline text-ink-2 hover:text-jade hover:border-jade/40 rounded border px-2 py-1 text-2xs transition-colors"
+          >
+            <span className="data">{s.station}</span> · {s.sst_degc}°C
+          </button>
+        ))}
+        {stations.length === 0 && (
+          <span className="text-ink-3 text-2xs">No mooring has reported recently.</span>
+        )}
+      </div>
+
+      {busy && (
+        <p className="text-ink-3 flex items-center gap-1.5 text-2xs">
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+          Matching satellite days against {place.label}…
+        </p>
+      )}
+
+      {result && !busy && (
+        result.validated ? (
+          <div className="border-hairline rounded border">
+            <div className="border-hairline flex flex-wrap items-baseline gap-2 border-b px-3 py-2">
+              <span className="label">RAMA {result.station}</span>
+              <span className="data text-ink-3 text-2xs">
+                {result.lat}°N {result.lon}°E · {result.matched_pairs} matched days
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 px-3 py-3 sm:grid-cols-4">
+              {[
+                ['bias', result.bias_degc, 'satellite minus buoy'],
+                ['RMSE', result.rmse_degc, 'typical error'],
+                ['max error', result.max_abs_error_degc, 'worst day'],
+              ].map(([label, value, hint]) => (
+                <div key={String(label)}>
+                  <div className="label text-2xs">{label}</div>
+                  <div className="data text-jade text-sm">
+                    {value === null || value === undefined ? '—' : `${value} °C`}
+                  </div>
+                  <div className="text-ink-3 text-2xs">{hint}</div>
+                </div>
+              ))}
+              <div>
+                <div className="label text-2xs">means</div>
+                <div className="data text-ink-0 text-sm">
+                  {result.buoy_mean_degc} / {result.product_mean_degc}
+                </div>
+                <div className="text-ink-3 text-2xs">buoy / satellite</div>
+              </div>
+            </div>
+            <p className="text-ink-2 border-hairline border-t px-3 py-2 text-2xs leading-relaxed">
+              {result.note}
+            </p>
+          </div>
+        ) : (
+          <p className="text-ink-2 border-hairline rounded border px-3 py-2 text-2xs leading-relaxed">
+            {result.reason}
+          </p>
+        )
+      )}
+    </div>
+  );
+}
+
 /* -------------------------------------------------------------- workspace */
 
 export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
@@ -526,7 +677,7 @@ export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
-  const [tab, setTab] = useState<'discover' | 'catalogue' | 'models'>('discover');
+  const [tab, setTab] = useState<'discover' | 'catalogue' | 'ground truth' | 'models'>('discover');
 
   useEffect(() => {
     void fetch('/api/research/catalogue')
@@ -617,7 +768,7 @@ export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
           Ask in plain language. ORCA returns datasets it has actually integrated.
         </span>
         <div className="ml-auto flex items-center gap-1">
-          {(['discover', 'catalogue', 'models'] as const).map((key) => (
+          {(['discover', 'catalogue', 'ground truth', 'models'] as const).map((key) => (
             <button
               key={key}
               type="button"
@@ -643,7 +794,9 @@ export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-4">
-          {tab === 'models' ? (
+          {tab === 'ground truth' ? (
+            <GroundTruth />
+          ) : tab === 'models' ? (
             <ModelCard status={models} />
           ) : (
             <>
