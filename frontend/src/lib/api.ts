@@ -24,6 +24,8 @@ import type {
   PointForecast,
   DriftClass,
   DriftPlan,
+  DistressResponse,
+  SearchPlan,
   RasterCatalogue,
   RiskResult,
   RoutePlan,
@@ -236,6 +238,34 @@ export const api = {
         object_class: args.objectClass,
       }),
     }),
+
+  /** The full response package: where to look, how to look, who to call, and
+   *  how long until they arrive. Routing the transit costs a live lattice
+   *  sample, so `routeTransit: false` gives a fast triage answer. */
+  distressAlert: (args: {
+    lat: number;
+    lon: number;
+    hoursSince: number;
+    objectClass: string;
+    unitCode?: string;
+    units?: number;
+    routeTransit?: boolean;
+  }) =>
+    request<DistressResponse>('/distress/alert', {
+      method: 'POST',
+      body: JSON.stringify({
+        lat: args.lat,
+        lon: args.lon,
+        hours_since: args.hoursSince,
+        object_class: args.objectClass,
+        unit_code: args.unitCode ?? 'ICG-FPV',
+        units: args.units ?? 1,
+        route_transit: args.routeTransit ?? true,
+      }),
+    }),
+
+  distressUnits: () =>
+    request<{ units: SearchPlan['unit'][]; note: string; aircraft: string }>('/distress/units'),
 
   rasterCatalogue: () => request<RasterCatalogue>('/rasters/catalogue'),
 

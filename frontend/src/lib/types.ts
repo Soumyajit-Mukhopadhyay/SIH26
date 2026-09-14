@@ -739,3 +739,151 @@ export interface DriftClass {
   coefficient_spread: number;
   note: string;
 }
+
+// --------------------------------------------------------------------------
+// Distress: the full response package for a person or vessel in the water.
+// --------------------------------------------------------------------------
+
+/** One Maritime Rescue Coordination Centre or Sub-Centre, with the numbers
+ *  from Appendix 'A' of the National Maritime SAR Plan 2022. */
+export interface RescueContact {
+  name: string;
+  kind: 'MRCC' | 'MRSC';
+  coordinates: { lat: number; lon: number };
+  distance_km: number;
+  bearing_from_incident_deg: number;
+  state: string;
+  sea_area: string;
+  coordinating_mrcc: string;
+  /** Distress line first — under pressure people dial the first number they see. */
+  telephone: string[];
+  email: string[];
+  fax: string[];
+  /** The link that still works when the mobile network does not. */
+  inmarsat_c: string | null;
+  aftn: string | null;
+  position_note: string;
+}
+
+export interface SweepWidth {
+  search_object: string;
+  substituted_default: boolean;
+  sru_column: 'vessel' | 'small_boat';
+  visibility_nm: number;
+  visibility_assumed: boolean;
+  uncorrected_nm: number;
+  weather_factor: number;
+  weather_note: string;
+  fatigue_factor: number;
+  corrected_nm: number;
+  corrected_km: number;
+}
+
+export interface SearchPlan {
+  unit: {
+    code: string;
+    label: string;
+    search_speed_kn: number;
+    transit_speed_kn: number;
+    on_scene_endurance_h: number;
+    max_search_wave_m: number;
+    note: string;
+  };
+  units_assigned: number;
+  sweep_width: SweepWidth;
+  track_spacing_nm: number;
+  track_spacing_km: number;
+  /** True when conditions want legs closer than a boat can navigate, which
+   *  costs coverage rather than gaining it. */
+  track_spacing_floored: boolean;
+  coverage_requested: number;
+  coverage_achieved: number;
+  area_km2: number;
+  area_sq_nm: number;
+  search_hours: number;
+  track_length_nm: number;
+  probability_of_detection: number;
+  pattern: { code: string; name: string; why: string };
+  /** Everything that stops this plan from closing. Empty means it closes. */
+  limits: string[];
+  closes: boolean;
+  conditions_used: {
+    visibility_km: number | null;
+    wind_kn: number | null;
+    wave_m: number | null;
+  };
+  how_to_read: string;
+  pod_is_modelled: string;
+  pos_note: string;
+  aircraft_note: string;
+  citations: Citation[];
+}
+
+export interface DistressTransit {
+  /** False means this is a great-circle fallback, not a checked route. */
+  routed: boolean;
+  estimate?: string;
+  reason?: string;
+  unit?: string;
+  transit_speed_kn?: number;
+  distance_nm?: number;
+  distance_km?: number;
+  direct_nm?: number;
+  detour_pct?: number;
+  launch_delay_h?: number;
+  steaming_hours?: number;
+  total_hours?: number;
+  eta_note?: string;
+  path?: [number, number][];
+  worst_verdict?: string;
+  why_this_route?: string;
+  degraded?: string | null;
+  router_note?: string;
+  what_a_refusal_means?: string;
+}
+
+export interface DistressResponse {
+  distress_version: string;
+  raised_at: string;
+  incident: {
+    last_known_position: { lat: number; lon: number };
+    hours_since_last_known: number;
+    object_class: DriftPlan['object_class'];
+    datum: { lat: number; lon: number };
+    datum_note: string;
+  };
+  search_area: {
+    containment: { fraction: number; area_km2: number; ring: [number, number][] }[];
+    displacement_km: number;
+    bearing: string;
+    spread_sources: DriftPlan['spread_sources'];
+  };
+  search_plan: SearchPlan;
+  conditions_at_datum: {
+    wave_m: number | null;
+    wind_kn: number | null;
+    visibility_km: number | null;
+  };
+  notify: RescueContact[];
+  coordinating_mrcc: string;
+  first_call: {
+    number: string;
+    why: string;
+    nearest_centre: string;
+    nearest_centre_km: number;
+    nearest_centre_bearing_deg: number;
+  };
+  transit: DistressTransit;
+  datum_growth: {
+    estimated: boolean;
+    why?: string;
+    area_now_km2?: number;
+    hours_at_arrival?: number;
+    area_on_arrival_km2?: number;
+    growth_factor?: number;
+    why_it_matters?: string;
+    method?: string;
+  };
+  not_a_dispatch: string;
+  citations: Citation[];
+}

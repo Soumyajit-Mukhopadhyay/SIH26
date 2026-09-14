@@ -679,6 +679,18 @@ export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
   const [exporting, setExporting] = useState<string | null>(null);
   const [tab, setTab] = useState<'discover' | 'catalogue' | 'ground truth' | 'models'>('discover');
 
+  // Escape closes it. This is a `fixed inset-0 z-50` overlay covering the whole
+  // console, so without this the only way out is one small button in a corner —
+  // and anyone who hits Escape and sees nothing happen assumes the app has hung
+  // rather than that they reached for the wrong control.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   useEffect(() => {
     void fetch('/api/research/catalogue')
       .then((r) => (r.ok ? r.json() : null))

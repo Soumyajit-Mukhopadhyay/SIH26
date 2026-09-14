@@ -27,6 +27,7 @@ import {
   ChevronRight,
   Crosshair,
   LifeBuoy,
+  Siren,
   Loader2,
   MapPin,
   Navigation,
@@ -38,6 +39,7 @@ import {
 import { clsx } from 'clsx';
 import { api, ApiError } from '@/lib/api';
 import type {
+  DistressResponse,
   FenceCollection,
   FreshnessReport,
   GeofenceCheck,
@@ -67,6 +69,7 @@ import { ChatPanel } from '@/components/ChatPanel';
 import { useVoiceRoster } from '@/components/VoiceBar';
 import { SeaStatePanel } from '@/components/SeaStatePanel';
 import { RoutePanel } from '@/components/RoutePanel';
+import { DistressPanel } from '@/components/DistressPanel';
 import { SarPanel } from '@/components/SarPanel';
 import { AlertRail } from '@/components/AlertRail';
 import { useAlerts } from '@/hooks/useAlerts';
@@ -187,6 +190,8 @@ export default function App() {
   // that took two thousand particles to compute.
   const [sarOpen, setSarOpen] = useState(false);
   const [sarPlan, setSarPlan] = useState<DriftPlan | null>(null);
+  const [distressOpen, setDistressOpen] = useState(false);
+  const [distress, setDistress] = useState<DistressResponse | null>(null);
   const [sarHours, setSarHours] = useState(6);
   const [sarClass, setSarClass] = useState('PIW-VERTICAL');
   const [sarClasses, setSarClasses] = useState<DriftClass[]>([]);
@@ -775,6 +780,94 @@ export default function App() {
       );
     }
 
+    // ---- the distress response ------------------------------------------
+    //
+    // A different palette from the SAR rings on purpose. SAR mode answers a
+    // modelling question; distress mode is an incident, and letting the two look
+    // identical on the map would let a coordinator confuse a what-if with a live
+    // case. The transit track is the piece with no SAR equivalent: it is the
+    // only line here that a crew actually steers.
+    if (distress) {
+      const rings = [...distress.search_area.containment].sort((a, b) => b.fraction - a.fraction);
+      for (const area of rings) {
+        const tight = area.fraction <= 0.6;
+        out.push(
+          new GeoJsonLayer({
+            id: `distress-area-${area.fraction}`,
+            data: {
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [area.ring] },
+              properties: { fraction: area.fraction },
+            } as never,
+            filled: true,
+            stroked: true,
+            getFillColor: tight ? [244, 63, 94, 58] : [244, 63, 94, 26],
+            getLineColor: tight ? [253, 164, 175, 235] : [244, 63, 94, 190],
+            getLineWidth: 2.5,
+            lineWidthUnits: 'pixels',
+            pickable: false,
+          }),
+        );
+      }
+
+      // The transit, only when it was actually routed. A great-circle fallback
+      // is an ETA, not a track to steer, and drawing it as a line on a chart
+      // would invite somebody to follow it across a headland.
+      if (distress.transit.routed && distress.transit.path?.length) {
+        out.push(
+          new PathLayer<{ path: [number, number][] }>({
+            id: 'distress-transit',
+            data: [{ path: distress.transit.path }],
+            getPath: (d) => d.path,
+            getColor: [56, 189, 248, 225],
+            getWidth: 3,
+            widthUnits: 'pixels',
+            pickable: false,
+          }),
+        );
+      }
+
+      out.push(
+        new ScatterplotLayer<{ position: [number, number]; kind: string }>({
+          id: 'distress-centres',
+          data: distress.notify.map((contact) => ({
+            position: [contact.coordinates.lon, contact.coordinates.lat] as [number, number],
+            kind: contact.kind,
+          })),
+          getPosition: (d) => d.position,
+          getRadius: (d) => (d.kind === 'MRCC' ? 8 : 6),
+          radiusUnits: 'pixels',
+          filled: true,
+          stroked: true,
+          getFillColor: [14, 165, 233, 200],
+          getLineColor: [240, 249, 255, 240],
+          getLineWidth: 1.5,
+          lineWidthUnits: 'pixels',
+          pickable: false,
+        }),
+        new ScatterplotLayer<{ position: [number, number] }>({
+          id: 'distress-lkp',
+          data: [
+            {
+              position: [
+                distress.incident.last_known_position.lon,
+                distress.incident.last_known_position.lat,
+              ] as [number, number],
+            },
+          ],
+          getPosition: (d) => d.position,
+          getRadius: 7,
+          radiusUnits: 'pixels',
+          filled: false,
+          stroked: true,
+          getLineColor: [255, 255, 255, 245],
+          getLineWidth: 2.5,
+          lineWidthUnits: 'pixels',
+          pickable: false,
+        }),
+      );
+    }
+
     // ---- the planned passage -------------------------------------------
     //
     // Three layers, in this order, because each one answers a different
@@ -921,6 +1014,7 @@ export default function App() {
     routePlan,
     routeDestination,
     sarPlan,
+    distress,
     risk?.verdict,
     query,
     rasters,
@@ -1045,6 +1139,26 @@ export default function App() {
                     setSarOpen(next);
                     setTreatmentRailOpen(false);
                     setIntelOpen(false);
+                    setRouteOpen(false);
+                    setSeaViewOpen(false);
+                    if (next) setAlertRailOpen(false);
+                  },
+                },
+                {
+                  id: 'distress',
+                  label: 'Distress',
+                  title: 'Distress — person or vessel in the water: call, search plan, transit',
+                  Icon: Siren,
+                  tone: 'text-red',
+                  active: distressOpen,
+                  disabled: false,
+                  badge: 0,
+                  toggle: () => {
+                    const next = !distressOpen;
+                    setDistressOpen(next);
+                    setTreatmentRailOpen(false);
+                    setIntelOpen(false);
+                    setSarOpen(false);
                     setRouteOpen(false);
                     setSeaViewOpen(false);
                     if (next) setAlertRailOpen(false);
@@ -1431,7 +1545,7 @@ export default function App() {
             </div>
           )}
 
-          {(treatmentRailOpen || intelOpen || sarOpen) && (
+          {(treatmentRailOpen || intelOpen || sarOpen || distressOpen) && (
             <div className="relative shrink-0">
               {treatmentRailOpen && (
                 <div className="absolute top-0 left-0">
@@ -1508,6 +1622,52 @@ export default function App() {
                         setIntelOpen(false);
                         setRouteOpen(false);
                         setSeaViewOpen(false);
+                        setDistressOpen(false);
+                      }
+                    }}
+                  />
+                </div>
+              )}
+
+              {distressOpen && (
+                <div className="absolute top-0 left-0">
+                  <DistressPanel
+                    origin={isLandSelection ? null : selection}
+                    objectClass={sarClass}
+                    classes={sarClasses}
+                    open
+                    onToggle={(open) => {
+                      setDistressOpen(open);
+                      if (open) {
+                        setAlertRailOpen(false);
+                        setTreatmentRailOpen(false);
+                        setIntelOpen(false);
+                        setSarOpen(false);
+                        setRouteOpen(false);
+                        setSeaViewOpen(false);
+                      }
+                    }}
+                    onResult={(next) => {
+                      setDistress(next);
+                      // Frame the whole incident: the search box AND the centre
+                      // responding to it. Zooming to the box alone hides the one
+                      // fact that governs everything — how far away help is.
+                      const ring = next?.search_area.containment.at(-1)?.ring;
+                      if (ring?.length) {
+                        const lons = ring.map((point) => point[0]);
+                        const lats = ring.map((point) => point[1]);
+                        const centre = next?.notify[0]?.coordinates;
+                        if (centre) {
+                          lons.push(centre.lon);
+                          lats.push(centre.lat);
+                        }
+                        const pad = 0.2;
+                        mapRef.current?.flyToBox(
+                          Math.min(...lons) - pad,
+                          Math.min(...lats) - pad,
+                          Math.max(...lons) + pad,
+                          Math.max(...lats) + pad,
+                        );
                       }
                     }}
                   />
