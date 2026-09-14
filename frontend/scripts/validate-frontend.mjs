@@ -14,8 +14,8 @@
 
 import { chromium } from "playwright-core";
 
-const UI = "http://localhost:5184";
-const API = "http://127.0.0.1:8024";
+const UI = "http://localhost:5173";
+const API = "http://127.0.0.1:8010";
 
 const results = [];
 const log = (ok, name, detail = "") => {
