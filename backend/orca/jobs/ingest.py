@@ -73,12 +73,19 @@ async def fetch_grid(
     *,
     grid: Grid = AOI,
     variable: str | None = None,
+    when: datetime | None = None,
 ) -> tuple[np.ndarray, datetime, str] | None:
     """Fetch one ERDDAP dataset over the AOI and put it on the ORCA grid.
 
     Returns ``(field, valid_time, dataset_id)``, or ``None`` when the source
     cannot serve the AOI — a condition the caller must handle rather than a
     reason to abort the run.
+
+    ``when`` requests a specific day instead of the latest. It exists so the
+    front-forecast model can assemble a training archive from the same code path
+    the live raster pipeline uses — a training set built by a second, parallel
+    fetcher is a training set that can silently diverge from what the model is
+    served at inference time.
     """
     dataset = DATASETS.get(key)
     if dataset is None:
@@ -93,7 +100,7 @@ async def fetch_grid(
         )
         return None
 
-    valid_time = await erddap.latest_time(key)
+    valid_time = when or await erddap.latest_time(key)
     if valid_time is None:
         return None
 

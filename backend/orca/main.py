@@ -33,6 +33,7 @@ from orca.api.routes import imagery as imagery_routes
 from orca.api.routes import language as language_routes
 from orca.api.routes import operations as operation_routes
 from orca.api.routes import rasters as raster_routes
+from orca.api.routes import research as research_routes
 from orca.api.routes import routing as routing_routes
 from orca.api.routes import sar as sar_routes
 from orca.config import DbDriver, Settings, get_settings, mask_dsn
@@ -261,6 +262,7 @@ def create_app() -> FastAPI:
     app.include_router(routing_routes.router)
     app.include_router(sar_routes.router)
     app.include_router(alert_routes.router)
+    app.include_router(research_routes.router)
     app.include_router(language_routes.router)
     app.include_router(geofence_routes.router)
     app.include_router(operation_routes.router)
