@@ -31,20 +31,56 @@ def spec(**overrides: object) -> builder.BuildRequest:
 
 class TestAdvertisedCapability:
     def test_only_variables_that_can_actually_be_delivered_are_offered(self) -> None:
-        """A variable only qualifies if some dataset has both an ERDDAP key here
-        AND a registry variable mapping. `wind_speed` failed the second test and
-        returned an empty column on every row — advertising it was worse than
-        omitting it, because a researcher cannot tell "no data today" from
-        "never possible"."""
+        """Every advertised variable must be reachable by one of the two paths,
+        and by exactly the path it claims.
+
+        The rule used to be "some catalogue dataset has an ERDDAP key AND a
+        registry variable mapping". That is now only one of the two ways a
+        column gets filled: a range variable is served straight from
+        `research.variables`, which earns its place by having been fetched
+        successfully at least once rather than by appearing in a catalogue.
+
+        What has NOT changed is the reason the test exists. `wind_speed` was
+        advertised off a catalogue entry that carried no variable mapping and
+        returned an empty column on every row, and a researcher cannot tell "no
+        data today" from "never possible"."""
+        from orca.research.variables import BY_NAME as REGISTRY
         from orca.sources.erddap import DATASETS
 
         for variable in builder.known_variables():
+            entry = REGISTRY.get(variable)
+            if entry is not None and entry.is_range_source:
+                # Served by a range endpoint. It needs no catalogue dataset, but
+                # it does need everything the Provenance sheet will quote.
+                assert entry.endpoint.startswith("https://")
+                assert entry.provider and entry.licence and entry.caveat
+                continue
+
             sources, missing = builder._sources_for([variable])
             assert not missing, f"{variable} is advertised but has no source"
             dataset = sources[variable]
             key = builder._erddap_key(dataset.id)
             assert key in DATASETS, f"{variable} maps to a non-existent registry key {key!r}"
             assert variable in set(DATASETS[key].variables.values())
+
+    def test_a_range_variable_is_never_also_routed_through_griddap(self) -> None:
+        """The two paths must not both claim a variable.
+
+        If they did, the per-day path would issue one request per day for data
+        the range path already has — and the two answers would differ, because
+        they are different products. `sea_surface_temperature` (Open-Meteo's
+        model field) and `sst` (NASA MUR satellite analysis) are deliberately
+        separate names for exactly this reason."""
+        from orca.research.variables import BY_NAME as REGISTRY
+
+        for name, entry in REGISTRY.items():
+            if not entry.is_range_source:
+                continue
+            sources, _ = builder._sources_for([name])
+            assert name not in sources, (
+                f"{name} is served by both the range endpoint and griddap; "
+                "one of the two must be renamed"
+            )
 
     def test_every_catalogue_key_resolves_to_a_real_registry_entry(self) -> None:
         """The catalogue id and the registry key diverged once — `ascat_winds`
@@ -81,6 +117,25 @@ class TestCostControl:
         plan = builder.plan(huge)
         assert plan["within_limits"] is False
         assert plan["cells"] > builder.MAX_CELLS
+
+    def test_a_range_variable_costs_one_request_not_one_per_day(self) -> None:
+        """The whole reason for the second path. Ninety days of wave height is
+        ONE call; costing it as ninety would refuse a request that is trivially
+        affordable."""
+        long_span = spec(
+            variables=["wave_height"],
+            start=datetime(2026, 1, 1, 9, tzinfo=UTC),
+            end=datetime(2026, 3, 31, 9, tzinfo=UTC),
+        )
+        costed = builder.plan(long_span)
+        assert costed["days"] > 80
+        assert costed["upstream_requests"] == 1
+        assert costed["range_variables"] == ["wave_height"]
+
+    def test_a_per_day_variable_still_costs_one_request_per_day(self) -> None:
+        costed = builder.plan(spec(variables=["sst"]))
+        assert costed["upstream_requests"] == costed["days"]
+        assert costed["per_day_variables"] == ["sst"]
 
     def test_step_days_reduces_the_cost(self) -> None:
         dense = builder.plan(spec(start=datetime(2026, 1, 1, 9, tzinfo=UTC)))
@@ -119,20 +174,43 @@ class TestEmptyColumnsAreExplained:
         assert "MONTHLY" in explained["chlorophyll"]
 
     def test_an_expired_archive_names_its_end_date(self) -> None:
+        """Uses `wind_direction`, not `wind_speed`.
+
+        `wind_speed` used to come off this dead ASCAT archive and now comes from
+        ERA5, so it no longer exercises this path at all — but the path still
+        matters, because `wind_direction` is still only available from the
+        archive and a request for it in 2026 returns nothing."""
+        from orca.research.catalogue import BY_ID
+
         result = builder.BuildResult(
-            rows=[{"date": "2026-08-01", "wind_speed": None}],
-            variables=["wind_speed"],
-            datasets=[
-                __import__("orca.research.catalogue", fromlist=["BY_ID"]).BY_ID["ascat_winds"]
-            ],
-            requested=spec(variables=["wind_speed"]),
+            rows=[{"date": "2026-08-01", "wind_direction": None}],
+            variables=["wind_direction"],
+            datasets=[BY_ID["ascat_winds"]],
+            requested=spec(variables=["wind_direction"]),
             gaps=1,
-            gaps_by_variable={"wind_speed": 1},
+            gaps_by_variable={"wind_direction": 1},
             days_attempted=1,
         )
         explained = result.empty_columns()
-        assert "ARCHIVE" in explained["wind_speed"]
-        assert "2023-05-21" in explained["wind_speed"]
+        assert "ARCHIVE" in explained["wind_direction"]
+        assert "2023-05-21" in explained["wind_direction"]
+
+    def test_a_range_variable_blames_its_provider_not_a_cadence(self) -> None:
+        """A range variable has no catalogue Dataset behind it, so the
+        dataset-shaped reasoning would have reported "unknown cadence" for
+        something whose provider and caveat are known exactly."""
+        result = builder.BuildResult(
+            rows=[{"date": "2026-08-01", "wave_height": None}],
+            variables=["wave_height"],
+            datasets=[],
+            requested=spec(variables=["wave_height"]),
+            gaps=1,
+            gaps_by_variable={"wave_height": 1},
+            days_attempted=1,
+        )
+        explained = result.empty_columns()
+        assert "unknown" not in explained["wave_height"]
+        assert "Open-Meteo" in explained["wave_height"]
 
     def test_a_partially_full_column_is_not_flagged(self) -> None:
         """Only a column with NO value at all is explained. A few gaps are
@@ -177,6 +255,25 @@ class TestRendering:
             requested=spec(),
             days_attempted=2,
         )
+
+    def test_every_delivered_column_is_attributed(self) -> None:
+        """A workbook whose wave, wind and rainfall columns all came from
+        Open-Meteo once cited only the ERDDAP dataset behind its SST column, so
+        eleven of twelve columns travelled with the wrong attribution — which is
+        precisely what the Provenance sheet exists to prevent."""
+        from orca.research.catalogue import BY_ID
+
+        result = builder.BuildResult(
+            rows=[{"date": "2026-08-01", "sst": 29.1, "wave_height": 1.2, "wind_speed": 14.0}],
+            variables=["sst", "wave_height", "wind_speed"],
+            datasets=[BY_ID["mur_sst"]],
+            requested=spec(variables=["sst", "wave_height", "wind_speed"]),
+            days_attempted=1,
+        )
+        attributed = {column for source in result.sources() for column in source["columns"]}
+        assert attributed == {"sst", "wave_height", "wind_speed"}
+        providers = {source["provider"] for source in result.sources()}
+        assert len(providers) >= 2, "the Open-Meteo columns must not inherit NASA's attribution"
 
     def test_csv_carries_provenance_in_its_preamble(self) -> None:
         text = builder.to_csv(self._result())
