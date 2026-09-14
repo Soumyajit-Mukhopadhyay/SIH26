@@ -136,7 +136,8 @@ export function useAgentStream() {
       question: string;
       lat: number;
       lon: number;
-      loaM: number;
+      loaM?: number | null;
+      boatClassCode?: string | null;
       place?: string;
       /** Reply in this language. The agent always reasons in English. */
       replyLanguage?: string;
@@ -231,7 +232,8 @@ export function useAgentStream() {
             question: args.question,
             lat: args.lat,
             lon: args.lon,
-            loa_m: args.loaM,
+            ...(args.loaM != null ? { loa_m: args.loaM } : {}),
+            ...(args.boatClassCode != null ? { boat_class_code: args.boatClassCode } : {}),
             place: args.place,
             reply_language: args.replyLanguage,
             speak: args.speak ?? false,

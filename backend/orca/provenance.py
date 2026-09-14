@@ -99,6 +99,7 @@ STALENESS_HOURS: dict[str, float] = {
     "wave_period": 6.0,
     "wave_direction": 6.0,
     "swell_height": 6.0,
+    "wind_wave_height": 6.0,
     "wind_speed": 6.0,
     "wind_direction": 6.0,
     "wind_gust": 3.0,
@@ -119,8 +120,11 @@ STALENESS_HOURS: dict[str, float] = {
     "chlorophyll": 72.0,  # cloud gaps make anything tighter dishonest
     "turbidity": 72.0,
     # ORCA-derived fields
-    "thermal_front": 24.0,
-    "pfz_rank": 24.0,
+    "thermal_front": 48.0,
+    # Daily SST plus typical MUR publish lag, and chlorophyll is monthly.
+    # A just-ingested PFZ must not look stale because the satellite scene
+    # already carried a day of latency — we cannot fetch a newer field.
+    "pfz_rank": 72.0,
     "marine_heatwave": 24.0,
     "upwelling_index": 24.0,
     # operational feeds

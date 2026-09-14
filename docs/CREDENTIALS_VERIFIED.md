@@ -76,7 +76,7 @@ incois_valueadded_products_datasets  INCOIS Value Added Products
 | Item | Impact | Plan |
 |---|---|---|
 | **MOSDAC** username/password | No Oceansat-3 / INSAT-3D direct pull | Register now — manual approval takes days. Until then, INCOIS ERDDAP's Oceansat-2 OCM + IRS P4 chlorophyll carry the Indian-satellite provenance story, which is genuinely sufficient |
-| **IMD API key** (+ egress IP whitelisting) | No official cyclone track / cone / port warning JSON | Register now. Meanwhile the IMD **CAP mirror** (verified 200) gives IMD alerts, and cyclone context comes from IBTrACS/tropycal |
+| **IMD API key** (+ egress IP whitelisting) | No fishermen / port / cyclone / lightning **JSON** | Register at https://api.imd.gov.in/public/register.php and whitelist the deploy host egress IP. The public HTML lists endpoints, not a stealable key. Until the key arrives, ORCA reads the IMD **CAP RSS** (verified 200) and will not invent an all-clear |
 | **Bhashini** `userID` + `ulcaApiKey` | Third language stack unavailable | Sarvam (verified) is primary, self-hosted AI4Bharat is the offline fallback. Bhashini is additive |
 | **data.gov.in** API key | No annual fisheries statistics | Cosmetic — one afternoon whenever the key arrives |
 | **Cloudflare R2** credentials | No object store | Designed out: derived rasters are written to local disk and served by our own API. See the plan's raster decision |

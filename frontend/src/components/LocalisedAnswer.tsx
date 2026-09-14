@@ -16,16 +16,17 @@
  * * **fully translated** — every clause actually got translated. When this is
  *   false but the first is true, some clause stayed in English on purpose: an
  *   unverified clause is left untranslated rather than translated unsafely.
- *
- * The spoken text is shown too, because it is a summary rather than the whole
- * answer, and a user who hears less than they read should be told why instead
- * of concluding the audio is broken.
  */
 
 import { Languages, Pause, Play, ShieldAlert, ShieldCheck, Volume2, VolumeX } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { Localised, Spoken } from '@/hooks/useAgentStream';
 import { inline, stripBullet } from '@/lib/markdown';
+
+/** Display name for the spoken advisory voice (backend may still use Sarvam ids). */
+function voiceLabel(_speaker: string | null | undefined): string {
+  return 'MitraAI';
+}
 
 export function LocalisedAnswer({
   localised,
@@ -77,7 +78,6 @@ export function LocalisedAnswer({
               {localised.ok ? 'figures intact' : 'figures unverified'}
               {numerals ? ` · ${numerals}` : ''}
             </span>
-            <span className="data text-ink-3 ml-auto text-2xs">via {localised.provider}</span>
           </div>
 
           {/* Indic scripts need the line height; at the tracking used for Latin
@@ -126,10 +126,7 @@ export function LocalisedAnswer({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <Volume2 className="text-ink-3 h-3 w-3" aria-hidden />
-                  <span className="data text-ink-2 text-2xs">
-                    {spoken.speaker}
-                    {spoken.durationS ? ` · ${spoken.durationS.toFixed(1)}s` : ''}
-                  </span>
+                  <span className="data text-ink-2 text-2xs">{voiceLabel(spoken.speaker)}</span>
                   {!spoken.nativeVoice && (
                     <span
                       className="bg-amber/12 text-amber rounded px-1 text-2xs"
@@ -144,16 +141,9 @@ export function LocalisedAnswer({
                     </span>
                   )}
                 </div>
-                {spoken.summarised && spoken.spokenText && (
-                  <p className="text-ink-3 mt-1 text-2xs leading-snug">
-                    Spoken: “{spoken.spokenText.slice(0, 160)}
-                    {spoken.spokenText.length > 160 ? '…' : ''}” — the verdict and its reason. The
-                    detail above is not read aloud.
-                  </p>
-                )}
-                {spoken.voiceNote && (
-                  <p className="text-ink-3 mt-0.5 text-2xs leading-snug">{spoken.voiceNote}</p>
-                )}
+                <p className="text-ink-3 mt-1 text-2xs leading-snug">
+                  Voice summary ready. Tap play to hear it.
+                </p>
               </div>
             </>
           ) : (

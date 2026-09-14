@@ -265,7 +265,9 @@ class GeofenceIndex:
 
         results: list[Proximity] = []
         for fence in self._candidates(point, radius_deg):
-            inside = bool(fence.is_area and fence.geometry.contains(point))
+            # ``covers`` counts the coastline itself; ``contains`` rejected a
+            # harbour click on the EEZ rim and left the panel stuck on OUTSIDE.
+            inside = bool(fence.is_area and fence.geometry.covers(point))
             # `.boundary` for BOTH Polygon and MultiPolygon. Measuring against
             # the polygon itself returns 0 for any interior point, so a boat deep
             # inside the EEZ reported "0.0 km from its boundary" — which reads as
@@ -317,6 +319,17 @@ class GeofenceIndex:
                     cross_point=cross_point,
                 )
             )
+
+        # The 200 NM line is the EEZ's outer rim. A boat inside the polygon is
+        # on India's side of that line — saying OUTSIDE there looked broken.
+        india_inside = any(p.fence.kind == "eez" and p.inside for p in results)
+        if india_inside:
+            for proximity in results:
+                if proximity.fence.kind != "eez_outer":
+                    continue
+                proximity.inside = True
+                if proximity.state == FenceState.OUTSIDE:
+                    proximity.state = FenceState.INSIDE
 
         results.sort(key=lambda p: p.distance_m)
         return results

@@ -245,11 +245,13 @@ export function AlertRail({
         {alerts.length === 0 ? (
           <p className="text-ink-3 px-1.5 py-2 text-2xs leading-snug">
             Nothing yet. ORCA alerts on <span className="text-ink-1">transitions</span>, not on
-            state — a job that reports the current verdict every cycle produces a feed, and a feed
-            is something people learn to ignore.
+            state — a repeating status line is a feed, and a feed gets ignored.
             {status?.watches
               ? ` Watching ${status.watches} position(s), re-checked every ${Math.round(status.poll_seconds / 60)} min.`
-              : ' Pick a point and press "watch this point" to start.'}
+              : ' Pick a point and press "watch this point" to start.'}{' '}
+            Planned: split a passage into N legs and re-check each one. When a live
+            Google-style route track is available, those legs become the watch points
+            and this box is where the crossings show up.
           </p>
         ) : (
           alerts.map((alert) => {

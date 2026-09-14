@@ -31,7 +31,7 @@ import numpy as np
 from orca.config import get_settings
 from orca.obs.health import registry
 from orca.provenance import Provenance, Provider, utcnow
-from orca.science import colormap, pfz
+from orca.science import colormap
 from orca.science.grid import AOI, Grid, regrid_nearest
 from orca.sources.erddap import DATASETS, erddap
 
@@ -262,6 +262,11 @@ async def run_ingest(
     await _ingest_vector_fields(report, raster_dir, grid, keep_history)
 
     # ---------------- PFZ ------------------------------------------------
+    # Imported here (not at module load) so FastAPI startup does not pull SciPy.
+    # On Windows, eager SciPy import has failed with a paging-file / DLL error and
+    # taken the whole API down — including risk/forecast that never need PFZ.
+    from orca.science import pfz
+
     lineage = [sst_dataset] + ([chl_dataset] if chl_dataset else [])
     try:
         result = pfz.derive(

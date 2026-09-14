@@ -2,7 +2,7 @@
 name = "orca"
 version = "0.1.0"
 description = "ORCA — Marine EcOsystem Reasoning with Collaborative Agents (SIH 2026)"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.11,<3.15"
 dependencies = [
   # --- web / api ---
   "fastapi>=0.115",

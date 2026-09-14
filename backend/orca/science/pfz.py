@@ -38,7 +38,6 @@ from datetime import datetime
 from typing import Any
 
 import numpy as np
-from scipy import ndimage
 
 from orca.provenance import Citation, Evidence, Freshness, Provenance, Provider
 from orca.science import fronts
@@ -46,6 +45,13 @@ from orca.science.fronts import Detector, FrontResult
 from orca.science.grid import AOI, H3_RESOLUTION, Grid
 
 log = logging.getLogger(__name__)
+
+
+def _ndimage():
+    """Lazy SciPy import — keeps API startup free of native DLL load cost."""
+    from scipy import ndimage
+
+    return ndimage
 
 #: The INCOIS productivity cut.
 CHLOROPHYLL_THRESHOLD = 0.3  # mg m-3
@@ -236,10 +242,10 @@ def _drop_specks(ranks: np.ndarray, min_cells: int) -> np.ndarray:
     """
     out = ranks.copy()
     for rank in (1, 2, 3):
-        labelled, count = ndimage.label(ranks == rank)
+        labelled, count = _ndimage().label(ranks == rank)
         if count == 0:
             continue
-        sizes = ndimage.sum(np.ones_like(labelled), labelled, index=np.arange(1, count + 1))
+        sizes = _ndimage().sum(np.ones_like(labelled), labelled, index=np.arange(1, count + 1))
         too_small = np.isin(labelled, np.nonzero(sizes < min_cells)[0] + 1)
         out[too_small & (out == rank)] = 0
     return out
@@ -260,7 +266,7 @@ def polygonise(result: PfzResult) -> list[dict[str, Any]]:
 
     for rank in (3, 2, 1):
         mask = result.ranks >= rank if rank == 1 else result.ranks == rank
-        labelled, count = ndimage.label(mask)
+        labelled, count = _ndimage().label(mask)
         for label_id in range(1, count + 1):
             component = labelled == label_id
             cells = int(component.sum())

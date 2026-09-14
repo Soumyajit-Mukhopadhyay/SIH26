@@ -1,0 +1,100 @@
+%% ORCA — High-level system design (PPT slide, top-to-bottom)
+%% Includes planned ML layer (dashed) — not implemented in code yet
+%% File: docs/ORCA_SYSTEM_DESIGN_PPT.mmd
+
+flowchart TB
+  classDef planned fill:#1a1a2e,stroke:#94a3b8,stroke-dasharray:6 4,color:#cbd5e1
+
+  U["Fisher / Operator<br/>Question · voice · map · vessel class"]
+
+  subgraph FE["FRONTEND — React · MapLibre · deck.gl"]
+    direction TB
+    FE1["Chat · search · alerts strip"]
+    FE2["Map — SST · PFZ · routes · EEZ/IMBL"]
+    FE3["Verdict · evidence · route · SAR panels"]
+    FE1 --> FE2 --> FE3
+  end
+  U --> FE1
+
+  API["FastAPI gateway<br/>/agent/stream · /risk · /route · /pfz · /geofence · /sar · /alerts"]
+  FE3 <--> API
+
+  API --> AG
+  API --> DIR
+  API --> BG
+
+  subgraph AG["A · LangGraph agent pipeline"]
+    direction TB
+    AG1["interaction → planner → execute"]
+    AG2["orchestrate — official → legal → geo → env"]
+    AG3["visualisation → reporting → critic ≤2 revise"]
+    AG1 --> AG2 --> AG3
+  end
+
+  subgraph DIR["B · Direct APIs — map without chat"]
+    direction TB
+    DIR1["Point forecast + risk"]
+    DIR2["Safe passage A*"]
+    DIR3["SAR drift · geofence · geocode"]
+  end
+
+  subgraph BG["C · Background — APScheduler"]
+    direction TB
+    BG1["ingest → SST · chl · PFZ rasters"]
+    BG2["monitor → alert transitions SSE"]
+  end
+
+  subgraph CORE["Deterministic core — rule engine has authority"]
+    direction TB
+    C1["Vessel resolve · thresholds · BSI/SVAS"]
+    C2["risk_engine — vetoes + index → GO/CAUTION/NO-GO/UNVERIFIABLE"]
+    C3["router · geofence · drift · PFZ science"]
+    C1 --> C2 --> C3
+  end
+
+  AG --> CORE
+  DIR --> CORE
+  BG --> C3
+
+  subgraph ML["PLANNED · Learned multi-hazard intelligence"]
+    direction TB
+    M1["TerraMind EO + temporal transformer + context MLP"]
+    M2["Fusion → P(wave|convection|visibility|collision|overall) 1–24h"]
+    M3["Uncertainty · abstain · calibration · official hard gate"]
+    M1 --> M2 --> M3
+  end
+
+  M3 -.->|"future blend"| C2
+  M3 -.->|"train: buoys · alerts · incidents"| SRC
+
+  subgraph SRC["Data sources"]
+    direction TB
+    S1["Open-Meteo · ERDDAP SST/chl · Marine Regions EEZ"]
+    S2["AIS · GFW · tides · CMEMS · NASA · Sentinel"]
+    S3["IMD/INCOIS official — adapter dormant"]
+  end
+
+  CORE --> SRC
+  BG --> SRC
+
+  subgraph STORE["Storage"]
+    direction TB
+    ST1["Rasters PNG+JSON · SQLite · TTL cache"]
+  end
+  SRC --> ST1
+  C3 --> ST1
+
+  subgraph OUT["Output"]
+    direction TB
+    O1["Evidence + provenance ledger"]
+    O2["SSE answer · structured decision · map ui_spec"]
+    O3["Layers · route line · MitraAI voice"]
+    O1 --> O2 --> O3
+  end
+
+  CORE --> O1
+  AG --> O1
+  BG2 --> O2
+  O3 --> FE3
+
+  class M1,M2,M3 planned

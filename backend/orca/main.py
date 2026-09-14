@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from orca.api.routes import agent as agent_routes
 from orca.api.routes import alerts as alert_routes
 from orca.api.routes import forecast as forecast_routes
+from orca.api.routes import geocode as geocode_routes
 from orca.api.routes import geofence as geofence_routes
 from orca.api.routes import health as health_routes
 from orca.api.routes import imagery as imagery_routes
@@ -159,6 +160,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.infra["fences"] = fence_count
     app.state.infra["fence_note"] = fence_note
 
+    # Register zero-auth IMD CAP (and the keyed JSON adapter, which stays
+    # dormant without IMD_API_KEY) so /freshness lists them from boot.
+    from orca.sources import imd as _imd  # noqa: F401
+
     # The trip monitor. Started here so it lives exactly as long as the app, and
     # stopped in the teardown below — an orphaned poll loop keeps hitting the
     # upstream APIs after a reload and spends a metered budget on nothing.
@@ -256,6 +261,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_routes.router)
     app.include_router(forecast_routes.router)
+    app.include_router(geocode_routes.router)
     app.include_router(agent_routes.router)
     app.include_router(raster_routes.router)
     app.include_router(imagery_routes.router)

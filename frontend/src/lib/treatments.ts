@@ -29,14 +29,14 @@
  * itself rather than showing stops that no longer match the pixels.
  */
 
+import type { CSSProperties } from 'react';
+
 export type TreatmentId =
   | 'standard'
   | 'thermal'
   | 'night-vision'
   | 'radar'
-  | 'bathymetric'
-  | 'crt'
-  | 'noir';
+  | 'bathymetric';
 
 export interface Treatment {
   id: TreatmentId;
@@ -46,9 +46,9 @@ export interface Treatment {
   /** The SVG filter to apply, or null for no filter. */
   filter: string | null;
   /** Extra CSS on the map wrapper — blend overlays live in `overlay`. */
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   /** A non-interactive layer drawn over the map, for scanlines and sweeps. */
-  overlay?: React.CSSProperties;
+  overlay?: CSSProperties;
   /**
    * Whether the treatment changes pixel colours in a way that makes the data
    * legends wrong. True for everything but `standard`.
@@ -62,7 +62,7 @@ export const TREATMENTS: Treatment[] = [
   {
     id: 'standard',
     label: 'Standard',
-    blurb: 'ORCA Deep. The only mode where the layer legends match the pixels.',
+    blurb: 'Everyday map. Use this when you need the colours to match the legends.',
     filter: null,
     distortsData: false,
     cost: 1,
@@ -70,7 +70,7 @@ export const TREATMENTS: Treatment[] = [
   {
     id: 'thermal',
     label: 'Thermal',
-    blurb: 'Ironbow palette over luminance — reads sea-surface structure as heat.',
+    blurb: 'Use this to pick out warm and cool water at a glance.',
     filter: 'url(#orca-thermal)',
     distortsData: true,
     cost: 2,
@@ -78,7 +78,7 @@ export const TREATMENTS: Treatment[] = [
   {
     id: 'night-vision',
     label: 'Night vision',
-    blurb: 'Image-intensifier green with grain. For a bridge at night.',
+    blurb: 'Use this on a dark bridge so the screen stays easy on the eyes.',
     filter: 'url(#orca-nightvision)',
     overlay: {
       // A vignette, because every intensifier tube has one. Radial rather than a
@@ -93,60 +93,35 @@ export const TREATMENTS: Treatment[] = [
   {
     id: 'radar',
     label: 'Radar',
-    blurb: 'Phosphor sweep and range rings. A plan-position-indicator look.',
+    blurb: 'Use this when you want range rings around the point you picked.',
     filter: 'url(#orca-radar)',
-    overlay: {
-      // Range rings, then a rotating sweep. Both pure CSS gradients so they cost
-      // one composited layer and no JavaScript.
-      backgroundImage: [
-        // Range rings, and a sweep that trails. Both were near-invisible at the
-        // first alphas because they were screen-blended over an already-bright
-        // green map; they have to be read against the treatment's own output, not
-        // against a dark mock.
-        'repeating-radial-gradient(circle at 50% 50%, rgba(126,255,170,0.30) 0 1.5px, rgba(0,0,0,0) 1.5px 110px)',
-        'conic-gradient(from var(--orca-sweep, 0deg) at 50% 50%, rgba(170,255,200,0.55) 0deg, rgba(126,255,170,0.22) 18deg, rgba(74,222,128,0.07) 44deg, rgba(0,0,0,0) 78deg, rgba(0,0,0,0) 360deg)',
-      ].join(','),
-      mixBlendMode: 'screen',
-      animation: 'orca-radar-sweep 4.2s linear infinite',
-    },
+    overlay: radarOverlayStyle(50, 50),
     distortsData: true,
     cost: 3,
   },
   {
     id: 'bathymetric',
     label: 'Bathymetric',
-    blurb: 'Posterised into depth bands — a discrete transfer curve, so the bands are real.',
+    blurb: 'Use this to see the map as stepped blue bands.',
     filter: 'url(#orca-bathymetric)',
     distortsData: true,
     cost: 2,
   },
-  {
-    id: 'crt',
-    label: 'CRT',
-    blurb: 'Scanlines and channel misregistration. A 1990s harbour-office monitor.',
-    filter: 'url(#orca-crt)',
-    overlay: {
-      backgroundImage:
-        'repeating-linear-gradient(to bottom, rgba(0,0,0,0.34) 0 1px, rgba(0,0,0,0) 1px 3px)',
-      mixBlendMode: 'multiply',
-    },
-    distortsData: true,
-    cost: 2,
-  },
-  {
-    id: 'noir',
-    label: 'Noir',
-    blurb: 'Luminance with a hard S-curve. Structure only, no hue at all.',
-    filter: 'url(#orca-noir)',
-    overlay: {
-      background:
-        'radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(0,0,0,0.5) 85%, rgba(0,0,0,0.78) 100%)',
-      mixBlendMode: 'multiply',
-    },
-    distortsData: true,
-    cost: 2,
-  },
 ];
+
+/** Range rings and sweep, centred on a map point (percent of the map box). */
+export function radarOverlayStyle(xPct: number, yPct: number): CSSProperties {
+  const x = `${xPct.toFixed(2)}%`;
+  const y = `${yPct.toFixed(2)}%`;
+  return {
+    backgroundImage: [
+      `repeating-radial-gradient(circle at ${x} ${y}, rgba(126,255,170,0.30) 0 1.5px, rgba(0,0,0,0) 1.5px 110px)`,
+      `conic-gradient(from var(--orca-sweep, 0deg) at ${x} ${y}, rgba(170,255,200,0.55) 0deg, rgba(126,255,170,0.22) 18deg, rgba(74,222,128,0.07) 44deg, rgba(0,0,0,0) 78deg, rgba(0,0,0,0) 360deg)`,
+    ].join(','),
+    mixBlendMode: 'screen',
+    animation: 'orca-radar-sweep 4.2s linear infinite',
+  };
+}
 
 export const TREATMENT_BY_ID: Record<TreatmentId, Treatment> = Object.fromEntries(
   TREATMENTS.map((t) => [t.id, t]),

@@ -50,6 +50,15 @@ FAKE_PAYLOAD = {
             "length_km": 222.0,
             "geometry": {"type": "LineString", "coordinates": [[80.0, 8.0], [80.0, 10.0]]},
         },
+        {
+            "key": "eez_outer_test",
+            "name": "India 200 NM",
+            "kind": "eez_outer",
+            "consequence": "Beyond this limit you are on the high seas.",
+            "authority": "UNCLOS",
+            "length_km": 200.0,
+            "geometry": {"type": "LineString", "coordinates": [[81.0, 8.0], [81.0, 10.0]]},
+        },
     ]
 }
 
@@ -57,7 +66,7 @@ FAKE_PAYLOAD = {
 @pytest.fixture
 def index() -> GeofenceIndex:
     idx = GeofenceIndex()
-    assert idx.load(FAKE_PAYLOAD) == 2
+    assert idx.load(FAKE_PAYLOAD) == 3
     return idx
 
 
@@ -65,7 +74,7 @@ class TestIndex:
     def test_it_builds(self, index):
         assert index.ready
         described = index.describe()
-        assert described["fence_count"] == 2
+        assert described["fence_count"] == 3
         assert described["index"] == "shapely STRtree"
 
     def test_an_unparseable_fence_is_skipped_not_fatal(self):
@@ -78,7 +87,7 @@ class TestIndex:
                 ]
             }
         )
-        assert count == 2, "one bad geometry must not lose the whole set"
+        assert count == 3, "one bad geometry must not lose the whole set"
 
     def test_an_empty_payload_leaves_it_not_ready(self):
         idx = GeofenceIndex()
@@ -110,6 +119,18 @@ class TestContainmentAndDistance:
         hits = {h.fence.key: h for h in index.check(9.0, 79.9, radius_km=300)}
         # 0.1 degrees of longitude at 9 N is ~11 km, not 0.1.
         assert hits["imbl_test"].distance_m == pytest.approx(11_000, rel=0.1)
+
+    def test_a_point_on_the_eez_rim_is_inside(self, index):
+        hits = {h.fence.key: h for h in index.check(9.0, 79.0, radius_km=300)}
+        assert hits["eez_test"].inside is True
+
+    def test_the_200_nm_line_follows_the_eez_side(self, index):
+        hits = {h.fence.key: h for h in index.check(9.0, 80.0, radius_km=300)}
+        assert hits["eez_test"].inside is True
+        assert hits["eez_outer_test"].inside is True
+        assert hits["eez_outer_test"].state is FenceState.INSIDE
+        # A treaty line has no interior — distance only.
+        assert hits["imbl_test"].inside is False
 
     def test_bearing_and_compass_point_at_the_boundary(self, index):
         hits = {h.fence.key: h for h in index.check(9.0, 79.9, radius_km=300)}

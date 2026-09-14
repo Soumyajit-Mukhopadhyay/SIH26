@@ -254,3 +254,58 @@ def test_classify_and_the_router_agree_on_the_vessel() -> None:
     """The router must never carry its own idea of what a boat can take."""
     assert classify(8.2).code == "IND-MOT-S"
     assert classify(22.0).code == "IND-MECH-L"
+
+
+class TestMaritimeWaterMask:
+    """Inland cells the Marine API still fills must not become a passage."""
+
+    def test_missing_mask_does_not_invent_a_land_veto(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(R, "_water_polygon", lambda: None)
+        assert R.in_navigable_water(19.0, 73.0) is None
+        assert R._land_reason(19.0, 73.0, wave=1.2) is None
+
+    def test_inland_of_the_eez_is_land_even_with_a_wave_height(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from shapely.geometry import box
+
+        # A strip of "sea" well east of the Indian west-coast interior.
+        monkeypatch.setattr(R, "_water_polygon", lambda: box(79.5, 12.0, 81.0, 14.0))
+        assert R.in_navigable_water(13.1, 80.3) is True
+        assert R.in_navigable_water(19.2, 73.1) is False
+        assert "inland" in (R._land_reason(19.2, 73.1, wave=1.4) or "")
+
+    def test_a_hop_whose_midpoint_is_inland_is_blocked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from shapely.geometry import box
+
+        monkeypatch.setattr(R, "_water_polygon", lambda: box(79.0, 11.0, 80.1, 13.0))
+        assert R._edge_crosses_land(12.0, 80.0, 12.0, 80.5) is True
+        assert R._edge_crosses_land(12.0, 79.4, 12.0, 79.8) is False
+
+    def test_drawn_path_pins_to_the_marked_sea_point(self) -> None:
+        lattice_path = [[80.0, 12.0], [80.0, 12.5]]
+        drawn = R._extend_drawn_path(lattice_path, start=(12.05, 80.02), goal=(13.10, 80.40))
+        assert drawn[0] == [80.02, 12.05]
+        assert drawn[-1] == [80.4, 13.1]
+
+    def test_drawn_path_reaches_the_marked_coastal_click(self) -> None:
+        # A* ends on a cell centre; the skipper marked the beach. The line must
+        # still terminate on that click, not 28 km offshore.
+        lattice_path = [[72.75, 19.00], [72.75, 18.75]]
+        drawn = R._extend_drawn_path(lattice_path, start=(19.02, 72.70), goal=(18.92, 72.82))
+        assert drawn[0] == [72.70, 19.02]
+        assert drawn[-1] == [72.82, 18.92]
+
+    def test_coastal_mark_pins_to_nearest_sea_not_inland(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from shapely.geometry import box
+
+        # A west-coast sea strip; 19.2N 73.1E is inland of it (Pune side).
+        monkeypatch.setattr(R, "_water_polygon", lambda: box(72.0, 18.0, 72.8, 20.0))
+        pin = R.closest_sea(19.2, 73.1)
+        assert pin is not None
+        assert pin[1] == pytest.approx(72.8, abs=0.05)
+        assert R.in_navigable_water(*pin) is True

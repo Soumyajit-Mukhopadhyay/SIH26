@@ -26,11 +26,17 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
-from scipy import ndimage
 
 log = logging.getLogger(__name__)
 
 Detector = Literal["sobel", "canny", "sied"]
+
+
+def _ndimage():
+    """Lazy SciPy import — avoids crashing FastAPI startup on Windows DLL load."""
+    from scipy import ndimage
+
+    return ndimage
 
 
 @dataclass(slots=True)
@@ -81,7 +87,7 @@ def _fill_for_filtering(field_: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         return np.zeros_like(filled), valid
     # distance_transform_edt with return_indices gives, for each invalid cell,
     # the index of the nearest valid one.
-    idx = ndimage.distance_transform_edt(~valid, return_distances=False, return_indices=True)
+    idx = _ndimage().distance_transform_edt(~valid, return_distances=False, return_indices=True)
     filled = filled[tuple(idx)]
     return filled, valid
 
@@ -94,11 +100,11 @@ def gradient_magnitude(field_: np.ndarray) -> np.ndarray:
     step is the single most common way a front map ends up tracing the coastline.
     """
     filled, valid = _fill_for_filtering(field_)
-    gx = ndimage.sobel(filled, axis=1, mode="nearest")
-    gy = ndimage.sobel(filled, axis=0, mode="nearest")
+    gx = _ndimage().sobel(filled, axis=1, mode="nearest")
+    gy = _ndimage().sobel(filled, axis=0, mode="nearest")
     magnitude = np.hypot(gx, gy) / 8.0  # /8 normalises the Sobel kernel weights
 
-    interior = ndimage.binary_erosion(valid, structure=np.ones((3, 3)), border_value=0)
+    interior = _ndimage().binary_erosion(valid, structure=np.ones((3, 3)), border_value=0)
     out = np.where(interior, magnitude, np.nan)
     return out
 
@@ -164,7 +170,7 @@ def canny_fronts(field_: np.ndarray, *, sigma: float = 2.0) -> FrontResult:
     low, high = float(np.nanmin(finite)), float(np.nanmax(finite))
     scaled = (filled - low) / (high - low) if high > low else np.zeros_like(filled)
 
-    interior = ndimage.binary_erosion(
+    interior = _ndimage().binary_erosion(
         valid, structure=np.ones((3, 3)), iterations=int(np.ceil(sigma)), border_value=0
     )
     edges = canny(scaled, sigma=sigma, mask=interior)
@@ -337,8 +343,8 @@ def _cohesion(cold: np.ndarray, warm: np.ndarray) -> float:
 def _population_boundary(cold: np.ndarray, warm: np.ndarray) -> np.ndarray:
     """Cells of one population directly adjacent to the other — the edge itself."""
     structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)
-    warm_dilated = ndimage.binary_dilation(warm, structure=structure)
-    cold_dilated = ndimage.binary_dilation(cold, structure=structure)
+    warm_dilated = _ndimage().binary_dilation(warm, structure=structure)
+    cold_dilated = _ndimage().binary_dilation(cold, structure=structure)
     return (cold & warm_dilated) | (warm & cold_dilated)
 
 

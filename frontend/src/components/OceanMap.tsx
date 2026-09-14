@@ -37,6 +37,8 @@ export interface OceanMapHandle {
   /** Move to a bbox — the visible causal link between an answer and the map. */
   flyToBox: (west: number, south: number, east: number, north: number) => void;
   resetView: () => void;
+  /** Selected lon/lat as percent of the map box — Look ranging centres here. */
+  projectPct: (lon: number, lat: number) => { x: number; y: number } | null;
 }
 
 export type MapSurface = 'water' | 'land' | 'unknown';
@@ -46,12 +48,14 @@ export function OceanMap({
   layers = [],
   onClick,
   onReady,
+  onViewChange,
   className,
 }: {
   ref?: React.Ref<OceanMapHandle>;
   layers?: Layer[];
   onClick?: (lon: number, lat: number, surface: MapSurface) => void;
   onReady?: () => void;
+  onViewChange?: () => void;
   className?: string;
 }) {
   const container = useRef<HTMLDivElement>(null);
@@ -59,6 +63,8 @@ export function OceanMap({
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const clickRef = useRef(onClick);
   clickRef.current = onClick;
+  const viewChangeRef = useRef(onViewChange);
+  viewChangeRef.current = onViewChange;
 
   // The current layers, held in a ref so the overlay can adopt them the moment
   // it exists. Without this the two are ordering-dependent: the style is fetched
@@ -90,6 +96,17 @@ export function OceanMap({
       },
       resetView: () => {
         mapRef.current?.flyTo({ ...HOME_VIEW, duration: 1600 });
+      },
+      projectPct: (lon, lat) => {
+        const map = mapRef.current;
+        if (!map) return null;
+        const point = map.project([lon, lat]);
+        const box = map.getContainer();
+        if (box.clientWidth < 1 || box.clientHeight < 1) return null;
+        return {
+          x: (point.x / box.clientWidth) * 100,
+          y: (point.y / box.clientHeight) * 100,
+        };
       },
     }),
     [],
@@ -225,6 +242,11 @@ export function OceanMap({
       }
       clickRef.current?.(event.lngLat.lng, event.lngLat.lat, surface);
     });
+
+    const notifyView = () => viewChangeRef.current?.();
+    map.on('move', notifyView);
+    map.on('zoom', notifyView);
+    map.on('resize', notifyView);
 
     map.on('error', (event) => {
       // Tile 404s are noise; a style failure is not.

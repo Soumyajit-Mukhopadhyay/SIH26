@@ -23,7 +23,7 @@ from orca.provenance import Citation, Provider
 
 #: Bump on every change to the rows below. Written into every RiskResult, so an
 #: advisory from last week can always be traced to the numbers that produced it.
-THRESHOLDS_VERSION = "orca-thresholds-2026.08"
+THRESHOLDS_VERSION = "orca-thresholds-2026.09"
 
 _JMSE = Citation(
     label="Small-craft operability limits in significant wave height",
@@ -155,24 +155,31 @@ BOAT_CLASSES: tuple[BoatClass, ...] = (
     ),
 )
 
-#: The lightning probability at which the engine vetoes regardless of class. A
-#: single hard number rather than a per-class one: a strike does not care how
-#: long the boat is.
+#: Qualitative CAPE instability bands (J/kg). Informed by conventional
+#: NOAA-style instability language (moderate ~1000–2500, strong >2500) and
+#: the user-facing ORCA prototype bands. These are atmospheric-potential
+#: labels only — not lightning probability and not automatic marine vetoes.
+CAPE_BAND_LOW_MAX = 500.0
+CAPE_BAND_MODERATE_MAX = 1000.0
+CAPE_BAND_ELEVATED_MAX = 1500.0
+CAPE_BAND_HIGH_MAX = 2500.0
+
+#: Legacy alias kept for policy/docs readers. Strong-instability reference
+#: (NOAA-style "above 2500 J/kg"). Not used as an automatic NO-GO gate.
+CAPE_VETO_J_KG = CAPE_BAND_HIGH_MAX
+
+#: Deprecated: CAPE no longer produces a hard percentage veto. Retained in
+#: policy() for API compatibility so older clients still see the field.
 LIGHTNING_VETO_PCT = 60.0
 
-#: CAPE at or above this is treated as equivalent to a high lightning
-#: probability. Needed because Open-Meteo has no lightning field and India has no
-#: free authoritative lightning source, so CAPE is what we actually have.
-#: 2500 J/kg is the conventional "strong instability" threshold.
-CAPE_VETO_J_KG = 2500.0
-
 _CAPE_CITATION = Citation(
-    label="CAPE as a convective-severity proxy",
+    label="CAPE as a convective-severity / instability indicator",
     provider=Provider.NOAA,
     url="https://www.weather.gov/lmk/indices",
     quote=(
         "CAPE of 1000-2500 J/kg indicates moderate instability; above 2500 J/kg indicates "
-        "strong instability supporting severe thunderstorm development."
+        "strong instability supporting severe thunderstorm development. This is atmospheric "
+        "potential, not a lightning observation or an official marine warning."
     ),
 )
 
@@ -196,6 +203,56 @@ def classify(loa_m: float) -> BoatClass:
 
 def by_code(code: str) -> BoatClass | None:
     return next((b for b in BOAT_CLASSES if b.code == code), None)
+
+
+@dataclass(frozen=True, slots=True)
+class VesselResolution:
+    """How a vessel was resolved for a safety/routing call.
+
+    Precedence (Phase 1): explicit ``boat_class_code`` → ``loa_m`` via
+    :func:`classify` → unknown. Unknown must never silently become 8.2 m /
+    IND-MOT-S.
+    """
+
+    boat: BoatClass | None
+    loa_m: float | None
+    source: str  # "category" | "loa" | "unknown"
+    error: str | None = None
+
+
+def resolve_vessel(
+    *,
+    boat_class_code: str | None = None,
+    loa_m: float | None = None,
+) -> VesselResolution:
+    """Resolve vessel limits without inventing a default class.
+
+    Explicit category wins over LOA when both are supplied. Invalid category
+    codes are reported via ``error`` (callers typically map that to HTTP 422).
+    """
+    if boat_class_code:
+        code = boat_class_code.strip()
+        if code:
+            boat = by_code(code)
+            if boat is None:
+                return VesselResolution(
+                    boat=None,
+                    loa_m=loa_m,
+                    source="unknown",
+                    error=f"unknown boat class {boat_class_code!r}; see GET /risk/thresholds",
+                )
+            return VesselResolution(boat=boat, loa_m=loa_m, source="category")
+    if loa_m is not None:
+        return VesselResolution(boat=classify(loa_m), loa_m=loa_m, source="loa")
+    return VesselResolution(boat=None, loa_m=None, source="unknown")
+
+
+def class_midpoint_loa_m(boat: BoatClass) -> float:
+    """Visual-scale helper only — not a safety input and not a claimed measurement."""
+    hi = boat.loa_max_m
+    if hi >= 1000:
+        hi = boat.loa_min_m + 10.0
+    return round((boat.loa_min_m + hi) / 2.0, 1)
 
 
 def table() -> list[dict[str, object]]:
@@ -223,8 +280,16 @@ def policy() -> dict[str, object]:
     """Class-independent policy values, with their citations."""
     return {
         "thresholds_version": THRESHOLDS_VERSION,
-        "lightning_veto_pct": LIGHTNING_VETO_PCT,
-        "cape_veto_j_kg": CAPE_VETO_J_KG,
+        "lightning_veto_pct": LIGHTNING_VETO_PCT,  # deprecated; CAPE is not a hard veto
+        "cape_hard_veto": False,
+        "cape_veto_j_kg": CAPE_VETO_J_KG,  # band reference (VERY_HIGH), not a veto gate
+        "cape_bands_j_kg": {
+            "LOW": f"<{CAPE_BAND_LOW_MAX:g}",
+            "MODERATE": f"{CAPE_BAND_LOW_MAX:g}-{CAPE_BAND_MODERATE_MAX:g}",
+            "ELEVATED": f"{CAPE_BAND_MODERATE_MAX:g}-{CAPE_BAND_ELEVATED_MAX:g}",
+            "HIGH": f"{CAPE_BAND_ELEVATED_MAX:g}-{CAPE_BAND_HIGH_MAX:g}",
+            "VERY_HIGH": f">{CAPE_BAND_HIGH_MAX:g}",
+        },
         "confidence_age_limit_h": CONFIDENCE_AGE_LIMIT_H,
         "weights": {"wave": 0.35, "wind": 0.30, "visibility": 0.15, "lightning": 0.20},
         "citations": [
@@ -237,6 +302,7 @@ def policy() -> dict[str, object]:
             "INCOIS's own SVAS thresholds are not published. These values are seeded from "
             "peer-reviewed small-craft literature and IMD's published warning conventions, "
             "are versioned, and are cited per row. ORCA supplements, never replaces, "
-            "official IMD and INCOIS bulletins."
+            "official IMD and INCOIS bulletins. CAPE bands are atmospheric-instability "
+            "indicators only and do not alone produce a NO-GO verdict."
         ),
     }

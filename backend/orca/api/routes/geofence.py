@@ -189,7 +189,8 @@ async def track(request: TrackRequest) -> dict[str, Any]:
 class CapRequest(BaseModel):
     lat: Lat
     lon: Lon
-    loa_m: float = Field(default=8.2, gt=0, le=200)
+    #: Optional. Precedence: boat_class_code > loa_m > UNKNOWN.
+    loa_m: float | None = Field(default=None, gt=0, le=200)
     boat_class_code: str | None = None
     place: str | None = None
     radius_km: float = Field(default=25.0, gt=0, le=200)
@@ -216,7 +217,12 @@ async def advisory_cap(request: CapRequest) -> Response:
             )
 
     evidence = await open_meteo.conditions_at(request.lat, request.lon)
-    risk = assess_from_evidence(evidence, loa_m=request.loa_m, boat_class=boat_class)
+    risk = assess_from_evidence(
+        evidence,
+        loa_m=request.loa_m,
+        boat_class=boat_class,
+        boat_class_code=None if boat_class else request.boat_class_code,
+    )
 
     translated = None
     if request.translate_to:

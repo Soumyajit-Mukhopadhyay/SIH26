@@ -152,11 +152,15 @@ class TestTransitions:
     def test_a_new_veto_alerts_even_without_a_band_change(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Lightning arriving over an already-NO-GO sea is new information."""
-        # Both are NO-GO on wave height; the second adds a lightning veto.
+        """Wind rising over an already-NO-GO sea is new information."""
+        # Both are NO-GO on wave height; the second adds a wind veto.
+        # CAPE must not invent a hard veto here.
         install_conditions(
             monkeypatch,
-            [evidence_for(wave_m=3.5, cape=50.0), evidence_for(wave_m=3.5, cape=3000.0)],
+            [
+                evidence_for(wave_m=3.5, wind_kn=8.0, cape=50.0),
+                evidence_for(wave_m=3.5, wind_kn=30.0, cape=50.0),
+            ],
         )
         monitor = Monitor()
         entry = monitor.watch(lat=13.0, lon=80.6, loa_m=8.2)

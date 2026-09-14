@@ -21,7 +21,15 @@ from datetime import datetime, time, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from orca.provenance import Citation, Evidence, Freshness, Provenance, Provider, utcnow
+from orca.provenance import (
+    Citation,
+    Evidence,
+    Freshness,
+    Provenance,
+    Provider,
+    staleness_hours,
+    utcnow,
+)
 from orca.services import thresholds
 from orca.services.cross_validation import validate_point
 from orca.services.overpass import predict_overpasses
@@ -30,6 +38,7 @@ from orca.sources import open_meteo
 from orca.sources.ais import aisstream
 from orca.sources.erddap import DATASETS, erddap
 from orca.sources.gfw import gfw
+from orca.sources.imd import alerts_at as imd_alerts_at
 from orca.sources.worldtides import worldtides
 
 log = logging.getLogger(__name__)
@@ -134,7 +143,11 @@ async def _fetch_tides(lat: float, lon: float, **_: Any) -> ToolResult:
 
 
 async def _assess_forecast_risk(
-    lat: float, lon: float, loa_m: float = 8.2, **_: Any
+    lat: float,
+    lon: float,
+    loa_m: float | None = None,
+    boat_class_code: str | None = None,
+    **_: Any,
 ) -> ToolResult:
     """Assess the worst forecast hour in tomorrow's local morning window.
 
@@ -178,7 +191,7 @@ async def _assess_forecast_risk(
             )
             if abs((nearest.freshness.valid_time - when).total_seconds()) <= 3600:
                 evidence[variable] = nearest
-        assessed.append((when, evidence, assess_from_evidence(evidence, loa_m=loa_m)))
+        assessed.append((when, evidence, assess_from_evidence(evidence, loa_m=loa_m, boat_class_code=boat_class_code)))
 
     severity = {"GO": 0, "CAUTION": 1, "UNVERIFIABLE": 2, "NO-GO": 3}
     when, evidence, risk = max(
@@ -213,39 +226,8 @@ async def _assess_forecast_risk(
 
 
 async def _check_marine_alerts(lat: float, lon: float, **_: Any) -> ToolResult:
-    """Official-alert status, kept separate from CAPE-based potential."""
-    from orca.config import get_settings
-
-    settings = get_settings()
-    imd_url = "https://api.imd.gov.in/public/api_reference.html"
-    reason = (
-        "IMD_API_KEY is not configured, so official IMD lightning, cyclone and fishermen "
-        "warnings cannot be verified in this deployment."
-        if not settings.has_imd
-        else "The IMD credential is configured, but the alert adapter is not enabled in this build."
-    )
-    unavailable = [
-        Evidence(
-            dataset_id="imd.api",
-            provider=Provider.IMD,
-            variable=variable,
-            value=None,
-            unit=None,
-            provenance=Provenance.UNAVAILABLE,
-            freshness=Freshness.static(),
-            url=imd_url,
-            location=(lon, lat),
-            citations=[
-                Citation(
-                    label="IMD API — marine, cyclone and lightning products",
-                    provider=Provider.IMD,
-                    url=imd_url,
-                )
-            ],
-            notes=reason,
-        )
-        for variable in ("lightning_alert", "cyclone_alert")
-    ]
+    """Official IMD warning status, kept separate from CAPE-based potential."""
+    alerts = await imd_alerts_at(lat, lon)
     cape_values = await open_meteo.forecast.at(
         lat, lon, variables=["convective_energy"]
     )
@@ -256,20 +238,39 @@ async def _check_marine_alerts(lat: float, lon: float, **_: Any) -> ToolResult:
         if cape is not None and cape.value is not None
         else " No CAPE context was available either."
     )
+    active = [
+        name
+        for name, value in (
+            ("cyclone", alerts.cyclone_alert),
+            ("fishermen", alerts.fishermen_warning),
+            ("port", alerts.port_warning),
+            ("sea-area", alerts.sea_area_warning),
+            ("lightning", alerts.lightning_alert),
+        )
+        if value not in (None, "none", "unavailable", "")
+    ]
+    if alerts.verified and active:
+        summary = (
+            "Official IMD warning in force: " + "; ".join(active) + "."
+            f" {alerts.reason}"
+        )
+    elif alerts.verified:
+        summary = (
+            "Official IMD warning feeds were checked; no cyclone, fishermen, port "
+            "or lightning warning is in force for this point."
+        )
+    else:
+        summary = alerts.reason
+    data = alerts.as_tool_data()
+    data["cape_j_kg"] = None if cape is None else cape.value
+    data["cape_is_alert"] = False
     return ToolResult(
-        ok=False,
+        ok=alerts.verified,
         tool="check_marine_alerts",
-        summary=reason + cape_text,
-        evidence=[*unavailable, *([cape] if cape is not None else [])],
-        data={
-            "official_alerts_verified": False,
-            "lightning_alert": "unavailable",
-            "cyclone_alert": "unavailable",
-            "cape_j_kg": None if cape is None else cape.value,
-            "cape_is_alert": False,
-            "reason": reason,
-        },
-        error=reason,
+        summary=summary + cape_text,
+        evidence=[*alerts.evidence, *([cape] if cape is not None else [])],
+        data=data,
+        error=None if alerts.verified else alerts.reason,
     )
 
 
@@ -495,9 +496,15 @@ async def _check_fishing_activity(lat: float, lon: float, **_: Any) -> ToolResul
     )
 
 
-async def _assess_risk(lat: float, lon: float, loa_m: float = 8.2, **_: Any) -> ToolResult:
+async def _assess_risk(
+    lat: float,
+    lon: float,
+    loa_m: float | None = None,
+    boat_class_code: str | None = None,
+    **_: Any,
+) -> ToolResult:
     evidence = await open_meteo.conditions_at(lat, lon)
-    result = assess_from_evidence(evidence, loa_m=loa_m)
+    result = assess_from_evidence(evidence, loa_m=loa_m, boat_class_code=boat_class_code)
     veto_text = f" — {len(result.vetoes)} veto(es)" if result.vetoes else ""
     return ToolResult(
         ok=True,
@@ -508,13 +515,38 @@ async def _assess_risk(lat: float, lon: float, loa_m: float = 8.2, **_: Any) -> 
     )
 
 
-async def _lookup_thresholds(loa_m: float = 8.2, **_: Any) -> ToolResult:
-    boat = thresholds.classify(loa_m)
+async def _lookup_thresholds(
+    loa_m: float | None = None,
+    boat_class_code: str | None = None,
+    **_: Any,
+) -> ToolResult:
+    resolved = thresholds.resolve_vessel(boat_class_code=boat_class_code, loa_m=loa_m)
+    if resolved.error:
+        return ToolResult(
+            ok=False,
+            tool="lookup_boat_thresholds",
+            summary=resolved.error,
+            error=resolved.error,
+        )
+    if resolved.boat is None:
+        return ToolResult(
+            ok=False,
+            tool="lookup_boat_thresholds",
+            summary="vessel type unknown — select a category or optional LOA",
+            error="vessel UNKNOWN",
+            data={"vessel_source": "unknown", "classes": thresholds.table()},
+        )
+    boat = resolved.boat
+    how = (
+        f"category {boat.code}"
+        if resolved.source == "category"
+        else f"{loa_m} m -> {boat.code}"
+    )
     return ToolResult(
         ok=True,
         tool="lookup_boat_thresholds",
         summary=(
-            f"{loa_m} m -> {boat.code} ({boat.label}); Hs limit {boat.max_wave_m} m, "
+            f"{how} ({boat.label}); Hs limit {boat.max_wave_m} m, "
             f"wind limit {boat.max_wind_kn} kn"
         ),
         data={
@@ -523,6 +555,7 @@ async def _lookup_thresholds(loa_m: float = 8.2, **_: Any) -> ToolResult:
             "max_wave_m": boat.max_wave_m,
             "max_wind_kn": boat.max_wind_kn,
             "min_visibility_km": boat.min_visibility_km,
+            "vessel_source": resolved.source,
             "citation": boat.source_citation.model_dump(mode="json"),
             "thresholds_version": thresholds.THRESHOLDS_VERSION,
         },
@@ -564,6 +597,30 @@ async def _forecast_window(lat: float, lon: float, days: int = 2, **_: Any) -> T
     )
 
 
+def _parse_sidecar_time(raw: object) -> datetime | None:
+    if raw is None:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def _pfz_field_freshness(sidecar: dict[str, Any], valid_time: datetime) -> Freshness:
+    """Stale only after the last ingest falls outside the source refresh window.
+
+    MUR SST and monthly chlorophyll update on their clocks, not ours. Ageing
+    the field from satellite ``valid_time`` made a just-refreshed derivation
+    look stale the moment ingest finished.
+    """
+    generated = _parse_sidecar_time(sidecar.get("generated_at"))
+    return Freshness.of(
+        "pfz_rank",
+        generated or valid_time,
+        threshold_hours=staleness_hours("pfz_rank"),
+    )
+
+
 async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
     """Nearest derived Potential Fishing Zone, as a distance and a bearing.
 
@@ -572,11 +629,15 @@ async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
     no data on where fish are likely to be found" — while a derived PFZ field was
     sitting on disk. The satellite-SST tool returns a temperature, which is an
     input to the answer and not the answer.
+
+    Distance is to the **nearest point on the zone polygon** (the edge a boat can
+    enter), not the polygon centroid. Centroid remains in the payload for map
+    labelling and sea-state screening at a representative interior point.
     """
     import json
 
     from orca.config import get_settings
-    from orca.services.geo import bearing_deg, compass_point, geodesic_m
+    from orca.services.geo import bearing_deg, compass_point, geodesic_m, nearest_on_polygon_m
 
     path = get_settings().raster_dir / "pfz_rank" / "latest.json"
     if not path.exists():
@@ -611,11 +672,23 @@ async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
             data={"derivation": derivation},
         )
 
-    scored = [(geodesic_m(lat, lon, z["centroid"]["lat"], z["centroid"]["lon"]), z) for z in zones]
-    scored.sort(key=lambda pair: pair[0])
-    # The best few, preferring higher rank at comparable distance — a rank 2 zone
-    # slightly further away is a better answer than the nearest rank 1.
-    best = sorted(scored[:12], key=lambda pair: (-pair[1]["rank"], pair[0]))[:3]
+    def _approach(zone: dict[str, Any]) -> tuple[float, float, float, bool]:
+        ring = zone.get("polygon")
+        if isinstance(ring, list) and len(ring) >= 3:
+            try:
+                return nearest_on_polygon_m(lat, lon, ring)
+            except ValueError:
+                pass
+        # Older sidecars without a ring: fall back to centroid.
+        c_lat = float(zone["centroid"]["lat"])
+        c_lon = float(zone["centroid"]["lon"])
+        return (geodesic_m(lat, lon, c_lat, c_lon), c_lat, c_lon, False)
+
+    scored = [(*_approach(z), z) for z in zones]
+    scored.sort(key=lambda row: row[0])
+    # Prefer higher rank among the nearest candidates — a rank-2 edge slightly
+    # further away beats the nearest rank-1 speck.
+    best = sorted(scored[:12], key=lambda row: (-row[4]["rank"], row[0]))[:3]
 
     valid_raw = sidecar.get("valid_time")
     try:
@@ -623,20 +696,29 @@ async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
     except (TypeError, ValueError):
         valid_time = utcnow()
     threshold = float((derivation := sidecar.get("pfz", {})).get("thresholds", {}).get("chlorophyll_mg_m3", 0.3))
-    freshness = Freshness.of("pfz_rank", valid_time)
+    freshness = _pfz_field_freshness(sidecar, valid_time)
     criteria = (
         f"thermal/chlorophyll front + chlorophyll > {threshold:g} mg m-3"
         if "chlorophyll" in derivation.get("inputs_used", [])
         else "thermal front only; chlorophyll was unavailable"
     )
     lines: list[str] = []
-    for distance_m, zone in best:
-        bearing = bearing_deg(lat, lon, zone["centroid"]["lat"], zone["centroid"]["lon"])
-        lines.append(
-            f"rank {zone['rank']} PFZ centred {zone['centroid']['lat']:.3f}°N, "
-            f"{zone['centroid']['lon']:.3f}°E — {distance_m / 1000:.0f} km "
-            f"{compass_point(bearing)}, about {zone['area_km2']:.0f} km2; {criteria}"
-        )
+    for distance_m, near_lat, near_lon, inside, zone in best:
+        if inside:
+            lines.append(
+                f"rank {zone['rank']} PFZ — you are already inside the zone "
+                f"(centroid {zone['centroid']['lat']:.3f}°N, {zone['centroid']['lon']:.3f}°E); "
+                f"about {zone['area_km2']:.0f} km2; {criteria}"
+            )
+        else:
+            bearing = bearing_deg(lat, lon, near_lat, near_lon)
+            lines.append(
+                f"rank {zone['rank']} PFZ — nearest edge {distance_m / 1000:.0f} km "
+                f"{compass_point(bearing)} "
+                f"(approach {near_lat:.3f}°N, {near_lon:.3f}°E; "
+                f"centroid {zone['centroid']['lat']:.3f}°N, {zone['centroid']['lon']:.3f}°E); "
+                f"about {zone['area_km2']:.0f} km2; {criteria}"
+            )
 
     from orca.science.pfz import INCOIS_CITATION
 
@@ -666,15 +748,16 @@ async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
             freshness=freshness,
             lineage=list(sidecar.get("lineage") or ["jplMURSST41"]),
             url=INCOIS_CITATION.url,
-            location=(float(zone["centroid"]["lon"]), float(zone["centroid"]["lat"])),
+            location=(float(near_lon), float(near_lat)),
             method=sidecar.get("method"),
             citations=[derived_citation, INCOIS_CITATION, *lineage_citations],
             notes=(
                 f"{criteria}. Valid {valid_time.isoformat()}. "
+                "Distance is to the nearest zone edge, not the centroid. "
                 "PFZ means potential fish aggregation, not a safety clearance."
             ),
         )
-        for _, zone in best
+        for distance_m, near_lat, near_lon, inside, zone in best
     ]
     return ToolResult(
         ok=True,
@@ -690,19 +773,18 @@ async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
                 {
                     "rank": zone["rank"],
                     "distance_km": round(distance_m / 1000, 1),
-                    "bearing_deg": round(
-                        bearing_deg(lat, lon, zone["centroid"]["lat"], zone["centroid"]["lon"]), 1
-                    ),
-                    "compass": compass_point(
-                        bearing_deg(lat, lon, zone["centroid"]["lat"], zone["centroid"]["lon"])
-                    ),
+                    "distance_to": "nearest_edge",
+                    "inside_zone": inside,
+                    "bearing_deg": round(bearing_deg(lat, lon, near_lat, near_lon), 1),
+                    "compass": compass_point(bearing_deg(lat, lon, near_lat, near_lon)),
+                    "approach": {"lat": round(near_lat, 4), "lon": round(near_lon, 4)},
                     "area_km2": zone["area_km2"],
                     "centroid": zone["centroid"],
                     "h3": zone.get("h3"),
                     "criteria": criteria,
                     "chlorophyll_threshold_mg_m3": threshold,
                 }
-                for distance_m, zone in best
+                for distance_m, near_lat, near_lon, inside, zone in best
             ],
             "derivation": derivation,
             "valid_time": valid_time.isoformat(),
@@ -711,14 +793,19 @@ async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
             "caveat": (
                 "INCOIS publishes PFZ advisories as maps, not as an API. This is ORCA's "
                 "reimplementation of the published methodology. "
-                f"Criteria that could not be applied: {derivation.get('inputs_missing', [])}."
+                f"Criteria that could not be applied: {derivation.get('inputs_missing', [])}. "
+                "Quoted distance is to the nearest zone edge, not the polygon centre."
             ),
         },
     )
 
 
 async def _screen_fishing_zones(
-    lat: float, lon: float, loa_m: float = 8.2, **_: Any
+    lat: float,
+    lon: float,
+    loa_m: float | None = None,
+    boat_class_code: str | None = None,
+    **_: Any,
 ) -> ToolResult:
     """Screen PFZ candidates for sea-state and legal-boundary problems.
 
@@ -752,7 +839,7 @@ async def _screen_fishing_zones(
     for zone, conditions in zip(zones, condition_sets, strict=True):
         zone_lat = float(zone["centroid"]["lat"])
         zone_lon = float(zone["centroid"]["lon"])
-        risk = assess_from_evidence(conditions, loa_m=loa_m)
+        risk = assess_from_evidence(conditions, loa_m=loa_m, boat_class_code=boat_class_code)
         boundary = await _check_geofences(zone_lat, zone_lon)
         proximities = list(boundary.data.get("proximities") or [])
         india = next((item for item in proximities if item.get("fence") == "eez_india"), None)
@@ -830,7 +917,8 @@ async def _plan_route(
     lon: float,
     to_lat: float | None = None,
     to_lon: float | None = None,
-    loa_m: float = 8.2,
+    loa_m: float | None = None,
+    boat_class_code: str | None = None,
     speed_kn: float = 8.0,
     **_: Any,
 ) -> ToolResult:
@@ -857,6 +945,7 @@ async def _plan_route(
         start=(lat, lon),
         goal=(float(to_lat), float(to_lon)),
         loa_m=loa_m,
+        boat_class_code=boat_class_code,
         speed_kn=speed_kn,
     )
 
@@ -994,7 +1083,8 @@ TOOLS: dict[str, Tool] = {
     "check_marine_alerts": Tool(
         name="check_marine_alerts",
         description=(
-            "Check whether official IMD lightning/cyclone warnings can be verified. CAPE is "
+            "Check official IMD fishermen, port, cyclone and lightning warnings "
+            "(CAP RSS always; keyed JSON when IMD_API_KEY is set). CAPE is "
             "reported separately as potential and is never presented as an alert."
         ),
         capability=Capability(
@@ -1003,8 +1093,8 @@ TOOLS: dict[str, Tool] = {
             latency_ms=1000,
             provenance="live",
             cost=2,
-            coverage="India; authoritative verification requires IMD API access",
-            decision_grade=False,
+            coverage="India; CAP RSS always, keyed JSON when IMD_API_KEY is registered",
+            decision_grade=True,
         ),
         run=_check_marine_alerts,
         owner="weather",

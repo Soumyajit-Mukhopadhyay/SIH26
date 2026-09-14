@@ -85,6 +85,21 @@ class TestFreshness:
     def test_thresholds_are_all_positive(self):
         assert all(v > 0 for v in STALENESS_HOURS.values())
 
+    def test_pfz_uses_ingest_time_so_a_fresh_fetch_is_not_stale(self):
+        from orca.agents.tools import _pfz_field_freshness
+
+        # MUR valid_time is often >24 h old at ingest. That is source lag, not
+        # an ORCA field we failed to refresh.
+        valid = utcnow() - timedelta(hours=40)
+        generated = utcnow() - timedelta(hours=2)
+        fresh = _pfz_field_freshness({"generated_at": generated.isoformat()}, valid)
+        assert not fresh.is_stale
+        stale = _pfz_field_freshness(
+            {"generated_at": (utcnow() - timedelta(hours=80)).isoformat()},
+            valid,
+        )
+        assert stale.is_stale
+
 
 class TestEvidenceInvariants:
     def test_derived_evidence_without_lineage_is_rejected(self):

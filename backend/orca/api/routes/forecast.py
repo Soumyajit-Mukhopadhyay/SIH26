@@ -57,9 +57,16 @@ class PointForecast(BaseModel):
 class RiskRequest(BaseModel):
     lat: Lat = Field(description="Latitude, degrees north.")
     lon: Lon = Field(description="Longitude, degrees east.")
-    loa_m: float = Field(default=8.2, gt=0, le=200, description="Boat length overall, metres.")
+    #: Optional. Precedence: boat_class_code > loa_m > UNKNOWN (never silent 8.2).
+    loa_m: float | None = Field(
+        default=None, gt=0, le=200, description="Optional length overall, metres."
+    )
     boat_class_code: str | None = Field(
-        default=None, description="Override the class inferred from loa_m."
+        default=None,
+        description=(
+            "Preferred vessel category (IND-TRAD / IND-MOT-S / …). "
+            "Wins over loa_m when both are supplied."
+        ),
     )
 
 
@@ -149,7 +156,13 @@ async def risk_assess(request: RiskRequest) -> RiskResult:
             )
 
     evidence = await open_meteo.conditions_at(request.lat, request.lon)
-    return assess_from_evidence(evidence, loa_m=request.loa_m, boat_class=boat_class)
+    # Category wins; LOA-only clients keep working; neither → UNKNOWN/UNVERIFIABLE.
+    return assess_from_evidence(
+        evidence,
+        loa_m=request.loa_m,
+        boat_class=boat_class,
+        boat_class_code=None if boat_class else request.boat_class_code,
+    )
 
 
 @router.get("/risk/thresholds", summary="The versioned threshold table, with citations")

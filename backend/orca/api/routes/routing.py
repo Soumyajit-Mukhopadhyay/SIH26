@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from orca.provenance import Lat, Lon, utcnow
 from orca.services import router as route_service
-from orca.services.thresholds import by_code, classify
+from orca.services.thresholds import resolve_vessel
 
 log = logging.getLogger(__name__)
 
@@ -29,9 +29,11 @@ class RouteRequest(BaseModel):
     from_lon: Lon
     to_lat: Lat
     to_lon: Lon
-    loa_m: float = Field(default=8.2, gt=0, le=200)
-    #: Overrides `loa_m` when given, so an authority can plan for a named class.
+    #: Optional. Precedence: boat_class / boat_class_code > loa_m > UNKNOWN.
+    loa_m: float | None = Field(default=None, gt=0, le=200)
+    #: Preferred vessel category code (legacy field name kept for API clients).
     boat_class: str | None = None
+    boat_class_code: str | None = None
     speed_kn: float = Field(default=8.0, gt=0.5, le=40)
     step_deg: float = Field(
         default=route_service.DEFAULT_STEP_DEG,
@@ -44,22 +46,36 @@ class RouteRequest(BaseModel):
 
 @router.post("/route/plan", summary="Plan a passage, or explain why there is not one")
 async def plan_route(request: RouteRequest) -> dict[str, Any]:
-    boat = None
-    if request.boat_class:
-        boat = by_code(request.boat_class)
-        if boat is None:
-            raise HTTPException(
-                status_code=422,
-                detail=f"unknown boat class {request.boat_class!r}; see GET /thresholds",
-            )
-    else:
-        boat = classify(request.loa_m)
+    code = request.boat_class_code or request.boat_class
+    resolved = resolve_vessel(boat_class_code=code, loa_m=request.loa_m)
+    if resolved.error:
+        raise HTTPException(status_code=422, detail=resolved.error)
+    if resolved.boat is None:
+        return {
+            "ok": False,
+            "vessel_unknown": True,
+            "boat_class": "UNKNOWN",
+            "reason": (
+                "Vessel type not specified. Select a boat category (or optionally enter "
+                "length overall) before planning a passage — ORCA will not invent a class."
+            ),
+            "requested": {
+                "from": [float(request.from_lon), float(request.from_lat)],
+                "to": [float(request.to_lon), float(request.to_lat)],
+                "speed_kn": request.speed_kn,
+                "boat_class": None,
+                "loa_m": request.loa_m,
+            },
+            "generated_at": utcnow().isoformat(),
+        }
+    boat = resolved.boat
 
     try:
         result = await route_service.plan(
             start=(float(request.from_lat), float(request.from_lon)),
             goal=(float(request.to_lat), float(request.to_lon)),
             boat_class=boat,
+            loa_m=request.loa_m,
             speed_kn=request.speed_kn,
             step_deg=request.step_deg,
             corridor_deg=request.corridor_deg,
@@ -75,6 +91,8 @@ async def plan_route(request: RouteRequest) -> dict[str, Any]:
             "to": [float(request.to_lon), float(request.to_lat)],
             "speed_kn": request.speed_kn,
             "boat_class": boat.code,
+            "loa_m": request.loa_m,
+            "vessel_source": resolved.source,
         },
         "generated_at": utcnow().isoformat(),
     }
@@ -108,9 +126,10 @@ async def route_limits() -> dict[str, Any]:
             "rather than merely plausible."
         ),
         "land_mask": (
-            "A cell with no wave height from the Marine API. That is the set of cells the wave "
-            "model itself declines to answer for, which is exactly the set a boat must not "
-            "cross."
+            "A cell is water only if the Marine API returns a wave height AND the point lies "
+            "inside India's EEZ polygon. Wave height alone is not enough: the marine model "
+            "often fills coastal and inland 0.25° cells. Hops whose midpoint leaves the EEZ "
+            "are also blocked so a diagonal cannot cut a peninsula."
         ),
         "upstream_budget": budget.describe(),
         "sample_cache": sample_cache_status(),

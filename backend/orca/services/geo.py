@@ -127,3 +127,58 @@ def time_to_cross_minutes(distance_m: float, speed_kn: float) -> float | None:
         return None
     metres_per_minute = speed_kn * 1852.0 / 60.0
     return distance_m / metres_per_minute
+
+
+def nearest_on_polygon_m(
+    lat: float,
+    lon: float,
+    ring: list[list[float]] | list[tuple[float, float]],
+    *,
+    edge_samples: int = 8,
+) -> tuple[float, float, float, bool]:
+    """Nearest approach to a GeoJSON-style ring ``[[lon, lat], ...]``.
+
+    Returns ``(distance_m, nearest_lat, nearest_lon, inside)``.
+
+    For a fisherman the useful number is how far to the **edge of the zone**,
+    not the polygon centroid. If the query point is already inside, distance is
+    0 and the nearest point is the query itself.
+    """
+    coords = [(float(pt[0]), float(pt[1])) for pt in ring if len(pt) >= 2]
+    if len(coords) < 3:
+        raise ValueError("polygon ring needs at least 3 positions")
+
+    # Close the ring if the writer omitted the repeated first vertex.
+    if coords[0] != coords[-1]:
+        coords = [*coords, coords[0]]
+
+    try:
+        from shapely.geometry import Point, Polygon
+
+        poly = Polygon(coords)
+        inside = bool(poly.is_valid and poly.contains(Point(lon, lat)))
+    except Exception:  # noqa: BLE001 — shapely optional at call sites; fall through
+        inside = False
+
+    if inside:
+        return (0.0, lat, lon, True)
+
+    best_m = float("inf")
+    best_lat = float(coords[0][1])
+    best_lon = float(coords[0][0])
+    samples = max(1, int(edge_samples))
+
+    for (lon_a, lat_a), (lon_b, lat_b) in itertools.pairwise(coords):
+        for step in range(samples + 1):
+            t = step / samples
+            # Linear in lon/lat is fine for densifying short PFZ edges; the
+            # reported distance itself is always geodesic.
+            sample_lon = lon_a + (lon_b - lon_a) * t
+            sample_lat = lat_a + (lat_b - lat_a) * t
+            dist = geodesic_m(lat, lon, sample_lat, sample_lon)
+            if dist < best_m:
+                best_m = dist
+                best_lat = sample_lat
+                best_lon = sample_lon
+
+    return (best_m, best_lat, best_lon, False)

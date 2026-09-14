@@ -16,6 +16,7 @@ import type {
   GeofenceCheck,
   ForecastSeries,
   FreshnessReport,
+  GeocodeSearchResponse,
   Health,
   Landmark,
   PfzNearest,
@@ -95,6 +96,9 @@ export const api = {
   datasets: () => request<DatasetRoster>('/datasets'),
 
   landmarks: () => request<{ landmarks: Landmark[] }>('/landmarks'),
+
+  geocodeSearch: (query: string, limit = 5) =>
+    request<GeocodeSearchResponse>(`/geocode/search?${q({ q: query, limit })}`),
 
   thresholds: () => request<ThresholdTable>('/risk/thresholds'),
 
@@ -182,15 +186,26 @@ export const api = {
       }),
     }),
 
-  capUrl: (lat: number, lon: number, loaM: number, translateTo?: string) =>
-    `/api/advisories/cap?${q({ lat, lon, loa_m: loaM, translate_to: translateTo })}`,
+  capUrl: (
+    lat: number,
+    lon: number,
+    opts?: { loaM?: number | null; boatClassCode?: string | null; translateTo?: string },
+  ) =>
+    `/api/advisories/cap?${q({
+      lat,
+      lon,
+      loa_m: opts?.loaM ?? undefined,
+      boat_class_code: opts?.boatClassCode ?? undefined,
+      translate_to: opts?.translateTo,
+    })}`,
 
   planRoute: (args: {
     fromLat: number;
     fromLon: number;
     toLat: number;
     toLon: number;
-    loaM: number;
+    loaM?: number | null;
+    boatClassCode?: string | null;
     speedKn: number;
   }) =>
     request<RoutePlan>('/route/plan', {
@@ -200,8 +215,9 @@ export const api = {
         from_lon: args.fromLon,
         to_lat: args.toLat,
         to_lon: args.toLon,
-        loa_m: args.loaM,
         speed_kn: args.speedKn,
+        ...(args.loaM != null ? { loa_m: args.loaM } : {}),
+        ...(args.boatClassCode != null ? { boat_class_code: args.boatClassCode } : {}),
       }),
     }),
 
@@ -233,14 +249,19 @@ export const api = {
   pfzNearest: (lat: number, lon: number, minRank = 1) =>
     request<PfzNearest>(`/pfz/nearest?${q({ lat, lon, min_rank: minRank })}`),
 
-  assessRisk: (lat: number, lon: number, loaM: number, boatClassCode?: string) =>
+  assessRisk: (
+    lat: number,
+    lon: number,
+    loaM?: number | null,
+    boatClassCode?: string | null,
+  ) =>
     request<RiskResult>('/risk/assess', {
       method: 'POST',
       body: JSON.stringify({
         lat,
         lon,
-        loa_m: loaM,
-        ...(boatClassCode ? { boat_class_code: boatClassCode } : {}),
+        ...(loaM != null ? { loa_m: loaM } : {}),
+        ...(boatClassCode != null ? { boat_class_code: boatClassCode } : {}),
       }),
     }),
 };
