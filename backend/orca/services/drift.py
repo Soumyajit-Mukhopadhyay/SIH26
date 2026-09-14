@@ -192,6 +192,23 @@ LEEWAY_CLASSES: dict[str, LeewayClass] = {
 #: which would send a boat crew to look at one wave.
 CURRENT_ERROR_MS = 0.15
 
+#: Fraction of the local current speed added to the floor above.
+#:
+#: The flat 0.15 m/s was measured as a basin-wide RMS, and using it everywhere
+#: made the search AREA almost independent of conditions: a person in the water
+#: off Chennai and one in a slack corner of the Bay of Bengal came back with 95%
+#: areas of 198 and 197 km2, while their drift DISPLACEMENTS differed by a factor
+#: of sixteen. That is not how current analyses behave. Error scales with the
+#: flow — a fast, sheared current is exactly where a 0.08 deg grid smooths away
+#: the structure that matters, and where two analyses of the same day disagree
+#: most.
+#:
+#: 25% of the local speed, on top of the floor. At 0.1 m/s the term is
+#: essentially the floor; at 1 m/s in a western boundary current it roughly
+#: doubles, and the search area grows with it — which is the behaviour a search
+#: coordinator expects and did not previously get.
+CURRENT_ERROR_SPEED_FRACTION = 0.25
+
 #: Particles. 2000 is where the 95% hull stops moving materially between runs and
 #: the whole computation still finishes inside a request.
 DEFAULT_PARTICLES = 2000
@@ -226,6 +243,10 @@ class DriftResult:
     #: Field samples actually used, for provenance.
     samples: list[dict[str, Any]]
     diagnostics: dict[str, Any]
+    #: The current-error sigma actually used, in m/s. Reported rather than
+    #: assumed constant: it scales with the local flow, so it differs between
+    #: a slack corner and a western boundary current.
+    current_sigma: float = CURRENT_ERROR_MS
 
 
 def _metres_per_degree(lat: float) -> tuple[float, float]:
@@ -328,7 +349,22 @@ async def simulate(
     # The current field's own error, drawn once per particle and held for the
     # whole run because it is correlated in time. See CURRENT_ERROR_MS: this is
     # the term that actually sets the size of a search area.
-    current_bias = rng.normal(0.0, CURRENT_ERROR_MS, (particles, 2))
+    #
+    # Scaled by the local flow rather than fixed, so a fast current produces a
+    # genuinely larger area. The speed is read from the first field sample below;
+    # until that exists the floor is used, which is also the right value when the
+    # current is unknown.
+    # `_sample_fields` returns u/v COMPONENTS, not a speed — it exists to feed the
+    # integration, which needs vectors. The speed is their magnitude.
+    first = await _sample_fields(lat, lon)
+    u, v = first.get("current_u"), first.get("current_v")
+    local_speed = (
+        math.hypot(float(u), float(v))
+        if isinstance(u, (int, float)) and isinstance(v, (int, float))
+        else 0.0
+    )
+    current_sigma = CURRENT_ERROR_MS + CURRENT_ERROR_SPEED_FRACTION * local_speed
+    current_bias = rng.normal(0.0, current_sigma, (particles, 2))
 
     positions = np.empty((particles, 2), dtype=np.float64)
     positions[:, 0] = lon
@@ -421,13 +457,15 @@ async def simulate(
         # Published so a coordinator can see which term is setting the area's
         # size, rather than being handed a polygon with no error budget.
         "spread_sources": {
-            "current_field_error_ms": CURRENT_ERROR_MS,
-            "current_field_error_km_1sigma": round(CURRENT_ERROR_MS * hours * 3.6, 2),
+            "current_field_error_ms": round(current_sigma, 3),
+            "current_field_error_floor_ms": CURRENT_ERROR_MS,
+            "current_field_error_km_1sigma": round(current_sigma * hours * 3.6, 2),
+            "scaled_by_local_current": current_sigma > CURRENT_ERROR_MS + 1e-9,
             "leeway_coefficient_spread": leeway.spread,
             "subgrid_eddy_ms": leeway.diffusion_ms,
             "dominant": (
                 "the current field's own error"
-                if CURRENT_ERROR_MS > leeway.dwl_slope * 8.0
+                if current_sigma > leeway.dwl_slope * 8.0
                 else "the object's leeway scatter"
             ),
         },
@@ -446,6 +484,7 @@ async def simulate(
         leeway=leeway,
         samples=samples,
         diagnostics=diagnostics,
+        current_sigma=current_sigma,
     )
 
 
@@ -567,7 +606,7 @@ def describe(result: DriftResult, *, fractions: tuple[float, ...] = (0.5, 0.95))
             "is split into downwind and crosswind components, both linear in the 10 m wind "
             "speed, with per-particle coefficients drawn from the class's measured spread and "
             "the crosswind sign drawn per particle. The surface current field's own error is "
-            f"drawn per particle too, at {CURRENT_ERROR_MS} m/s and held for the whole run "
+            f"drawn per particle too, at {result.current_sigma:.2f} m/s and held for the whole run "
             "because it is correlated in time — for a person in the water that term, not the "
             "object's leeway, is what sets the size of the area."
         ),
