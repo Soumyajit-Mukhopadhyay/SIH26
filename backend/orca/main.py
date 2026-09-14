@@ -34,6 +34,7 @@ from orca.api.routes import imagery as imagery_routes
 from orca.api.routes import language as language_routes
 from orca.api.routes import operations as operation_routes
 from orca.api.routes import rasters as raster_routes
+from orca.api.routes import distress as distress_routes
 from orca.api.routes import research as research_routes
 from orca.api.routes import routing as routing_routes
 from orca.api.routes import sar as sar_routes
@@ -266,6 +267,7 @@ def create_app() -> FastAPI:
     app.include_router(imagery_routes.router)
     app.include_router(routing_routes.router)
     app.include_router(sar_routes.router)
+    app.include_router(distress_routes.router)
     app.include_router(alert_routes.router)
     app.include_router(research_routes.router)
     app.include_router(language_routes.router)

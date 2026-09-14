@@ -574,7 +574,18 @@ async def plan(
                 "There is no water in this corridor that the rule engine will clear for "
                 f"a {boat.label}."
                 if water
-                else "There is no water in this corridor at all — check the coordinates."
+                # `water` counts nodes that got a risk assessment, so zero of them
+                # means one of two completely different things. Saying "check the
+                # coordinates" when the truth is "we were rate-limited and sampled
+                # nothing" sends the reader to look for a bug in their own input.
+                else (
+                    "Not one node in this corridor could be costed — every upstream sample was "
+                    "refused or empty, so the router does not know whether there is water here. "
+                    "This is a sampling failure, not a geographic finding. Retry in a minute: "
+                    "the most common cause is the upstream per-minute budget already being spent."
+                    if len(missing_variables) >= 2
+                    else "There is no water in this corridor at all — check the coordinates."
+                )
             ),
             "blocked_by": sorted(
                 {n.reason for n in lattice.nodes.values() if n.reason and n.passable is False}
