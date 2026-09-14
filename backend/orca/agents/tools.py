@@ -191,7 +191,13 @@ async def _assess_forecast_risk(
             )
             if abs((nearest.freshness.valid_time - when).total_seconds()) <= 3600:
                 evidence[variable] = nearest
-        assessed.append((when, evidence, assess_from_evidence(evidence, loa_m=loa_m, boat_class_code=boat_class_code)))
+        assessed.append(
+            (
+                when,
+                evidence,
+                assess_from_evidence(evidence, loa_m=loa_m, boat_class_code=boat_class_code),
+            )
+        )
 
     severity = {"GO": 0, "CAUTION": 1, "UNVERIFIABLE": 2, "NO-GO": 3}
     when, evidence, risk = max(
@@ -228,9 +234,7 @@ async def _assess_forecast_risk(
 async def _check_marine_alerts(lat: float, lon: float, **_: Any) -> ToolResult:
     """Official IMD warning status, kept separate from CAPE-based potential."""
     alerts = await imd_alerts_at(lat, lon)
-    cape_values = await open_meteo.forecast.at(
-        lat, lon, variables=["convective_energy"]
-    )
+    cape_values = await open_meteo.forecast.at(lat, lon, variables=["convective_energy"])
     cape = cape_values.get("convective_energy")
     cape_text = (
         f" CAPE is {cape.value} J/kg, which indicates thunderstorm potential only—not "
@@ -250,10 +254,7 @@ async def _check_marine_alerts(lat: float, lon: float, **_: Any) -> ToolResult:
         if value not in (None, "none", "unavailable", "")
     ]
     if alerts.verified and active:
-        summary = (
-            "Official IMD warning in force: " + "; ".join(active) + "."
-            f" {alerts.reason}"
-        )
+        summary = "Official IMD warning in force: " + "; ".join(active) + f". {alerts.reason}"
     elif alerts.verified:
         summary = (
             "Official IMD warning feeds were checked; no cyclone, fishermen, port "
@@ -537,17 +538,12 @@ async def _lookup_thresholds(
             data={"vessel_source": "unknown", "classes": thresholds.table()},
         )
     boat = resolved.boat
-    how = (
-        f"category {boat.code}"
-        if resolved.source == "category"
-        else f"{loa_m} m -> {boat.code}"
-    )
+    how = f"category {boat.code}" if resolved.source == "category" else f"{loa_m} m -> {boat.code}"
     return ToolResult(
         ok=True,
         tool="lookup_boat_thresholds",
         summary=(
-            f"{how} ({boat.label}); Hs limit {boat.max_wave_m} m, "
-            f"wind limit {boat.max_wind_kn} kn"
+            f"{how} ({boat.label}); Hs limit {boat.max_wave_m} m, wind limit {boat.max_wind_kn} kn"
         ),
         data={
             "code": boat.code,
@@ -695,7 +691,9 @@ async def _find_fishing_zones(lat: float, lon: float, **_: Any) -> ToolResult:
         valid_time = datetime.fromisoformat(str(valid_raw))
     except (TypeError, ValueError):
         valid_time = utcnow()
-    threshold = float((derivation := sidecar.get("pfz", {})).get("thresholds", {}).get("chlorophyll_mg_m3", 0.3))
+    threshold = float(
+        (derivation := sidecar.get("pfz", {})).get("thresholds", {}).get("chlorophyll_mg_m3", 0.3)
+    )
     freshness = _pfz_field_freshness(sidecar, valid_time)
     criteria = (
         f"thermal/chlorophyll front + chlorophyll > {threshold:g} mg m-3"
@@ -827,9 +825,7 @@ async def _screen_fishing_zones(
     zones = list(candidates.data.get("zones") or [])[:3]
     condition_sets = await asyncio.gather(
         *(
-            open_meteo.conditions_at(
-                float(zone["centroid"]["lat"]), float(zone["centroid"]["lon"])
-            )
+            open_meteo.conditions_at(float(zone["centroid"]["lat"]), float(zone["centroid"]["lon"]))
             for zone in zones
         )
     )
@@ -1007,6 +1003,113 @@ async def _list_datasets(**_: Any) -> ToolResult:
 # --------------------------------------------------------------------------- #
 # registry
 # --------------------------------------------------------------------------- #
+
+
+async def _build_dataset_file(
+    lat: float,
+    lon: float,
+    variables: list[str] | str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    radius_deg: float = 1.0,
+    **_: Any,
+) -> ToolResult:
+    """Assemble a multi-variable, multi-day dataset file for a researcher.
+
+    Returns a DOWNLOAD LINK rather than the data. A spreadsheet inlined into a
+    chat transcript is unusable — it cannot be opened, and it would blow the
+    context window the agent is reasoning in. The link points at the same
+    endpoint the researcher workspace uses, so there is one builder and not two.
+    """
+    from datetime import timedelta
+    from urllib.parse import urlencode
+
+    from orca.provenance import utcnow
+    from orca.research import builder
+
+    known = builder.known_variables()
+    wanted: list[str]
+    if isinstance(variables, str):
+        wanted = [v.strip() for v in variables.replace(",", " ").split() if v.strip()]
+    else:
+        wanted = list(variables or [])
+    wanted = [v for v in wanted if v in known]
+    if not wanted:
+        return ToolResult(
+            ok=False,
+            summary="no buildable variable was named",
+            error=(
+                "A dataset file needs at least one variable ORCA can serve. Available: "
+                + ", ".join(known)
+            ),
+        )
+
+    yesterday = utcnow().replace(hour=9, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    try:
+        start_at = builder.parse_day(start or "", fallback=yesterday - timedelta(days=30))
+        end_at = builder.parse_day(end or "today", fallback=yesterday)
+    except ValueError as exc:
+        return ToolResult(ok=False, summary="unreadable date", error=str(exc))
+    if start_at > end_at:
+        start_at, end_at = end_at, start_at
+
+    spec = builder.BuildRequest(
+        variables=wanted,
+        west=lon - radius_deg,
+        east=lon + radius_deg,
+        south=lat - radius_deg,
+        north=lat + radius_deg,
+        start=start_at,
+        end=end_at,
+    )
+    cost = builder.plan(spec)
+    if not cost["within_limits"]:
+        # Say what would fit rather than refusing flatly: the researcher can then
+        # ask for the smaller thing in one more turn instead of guessing.
+        return ToolResult(
+            ok=False,
+            summary=f"{cost['days']} days x {cost['variables']} variables is too large to build",
+            error=(
+                f"That spans {cost['days']} days ({cost['cells']} values), over ORCA's "
+                f"{cost['max_cells']} limit for one file. Narrow the range, or sample every "
+                "few days instead of daily."
+            ),
+            data=cost,
+        )
+
+    query = urlencode(
+        {
+            "variables": ",".join(wanted),
+            "west": round(spec.west, 3),
+            "east": round(spec.east, 3),
+            "south": round(spec.south, 3),
+            "north": round(spec.north, 3),
+            "start": f"{start_at:%Y-%m-%d}",
+            "end": f"{end_at:%Y-%m-%d}",
+            "format": "xlsx",
+        }
+    )
+    return ToolResult(
+        ok=True,
+        summary=(
+            f"{', '.join(wanted)} from {start_at:%d %b %Y} to {end_at:%d %b %Y} "
+            f"({cost['days']} days) — ready to download as an Excel file"
+        ),
+        data={
+            "download_url": f"/api/research/build?{query}",
+            "format": "xlsx",
+            "variables": wanted,
+            "start": f"{start_at:%Y-%m-%d}",
+            "end": f"{end_at:%Y-%m-%d}",
+            "days": cost["days"],
+            "bbox": [spec.west, spec.south, spec.east, spec.north],
+            "note": (
+                "The workbook carries a second sheet with every source's endpoint, licence and "
+                "caveat, so the file can be cited without coming back here."
+            ),
+        },
+    )
+
 
 TOOLS: dict[str, Tool] = {
     "fetch_marine_conditions": Tool(
@@ -1347,6 +1450,26 @@ TOOLS: dict[str, Tool] = {
         run=_list_datasets,
         owner="data_discovery",
     ),
+    "build_dataset_file": Tool(
+        name="build_dataset_file",
+        description=(
+            "Build a downloadable Excel or CSV dataset for a RESEARCHER: several variables over "
+            "a date range at a position. Use when someone asks for data 'from <date> to now', "
+            "for a spreadsheet, a file, a download, or a time series to analyse — as opposed to "
+            "a forecast or a safety verdict. Returns a download link, not the numbers."
+        ),
+        capability=Capability(
+            answers=("dataset", "download", "spreadsheet", "timeseries", "research", "export"),
+            resolution_deg=0.05,
+            latency_ms=8000,
+            provenance="live",
+            cost=4,
+            coverage="Indian EEZ, any date the upstream archives cover",
+            decision_grade=False,
+        ),
+        run=_build_dataset_file,
+        owner="data_discovery",
+    ),
 }
 
 
@@ -1381,6 +1504,10 @@ TOOL_ORDER: tuple[str, ...] = (
     "assess_forecast_risk",
     "plan_route",
     "discover_datasets",
+    # Last. Building a file is the slowest tool by an order of magnitude and
+    # nothing depends on its output, so it must not delay the verdict a fisherman
+    # is waiting on when a question happens to ask for both.
+    "build_dataset_file",
 )
 
 

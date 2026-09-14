@@ -293,6 +293,126 @@ async def federation_preview(
     )
 
 
+# ------------------------------------------------------------- build a file
+
+
+class BuildRequestBody(BaseModel):
+    variables: list[str] = Field(min_length=1, max_length=8)
+    west: float = Field(default=60.0, ge=-180, le=180)
+    south: float = Field(default=0.0, ge=-90, le=90)
+    east: float = Field(default=100.0, ge=-180, le=180)
+    north: float = Field(default=25.0, ge=-90, le=90)
+    start: str = Field(description="YYYY-MM-DD")
+    end: str = Field(default="today", description="YYYY-MM-DD, or 'today'")
+    points: int = Field(default=1, ge=1, le=9)
+    step_days: int = Field(default=1, ge=1, le=30)
+    format: str = Field(default="xlsx", pattern="^(xlsx|csv|json)$")
+
+
+@router.post("/research/build", summary="Build a multi-variable, multi-day dataset file")
+async def build_dataset(request: BuildRequestBody) -> Any:
+    """Several variables over a date range, as one downloadable file.
+
+    This is the shape a researcher actually asks for — "SST and wind off Kerala
+    from 1 June to today, as a spreadsheet" — as opposed to the single-day grid
+    `/research/export` returns.
+
+    The Excel workbook carries a second sheet with every source's endpoint,
+    licence and caveat. A spreadsheet that leaves the system with no record of
+    where its numbers came from is how a figure ends up in a paper with the wrong
+    attribution, and a commented CSV header does not survive a trip through Excel.
+    """
+    from fastapi.responses import Response
+
+    from orca.research import builder
+
+    now = utcnow().replace(hour=9, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    try:
+        start = builder.parse_day(request.start, fallback=now)
+        end = builder.parse_day(request.end, fallback=now)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if start > end:
+        raise HTTPException(status_code=422, detail="start must not be after end")
+
+    known = set(builder.known_variables())
+    unknown = [v for v in request.variables if v not in known]
+    if len(unknown) == len(request.variables):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "none of those variables can be served",
+                "requested": request.variables,
+                "available": sorted(known),
+            },
+        )
+
+    spec = builder.BuildRequest(
+        variables=request.variables,
+        west=request.west,
+        south=request.south,
+        east=request.east,
+        north=request.north,
+        start=start,
+        end=end,
+        points=request.points,
+        step_days=request.step_days,
+    )
+    cost = builder.plan(spec)
+    if not cost["within_limits"]:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "message": "that request is too large to build in one file",
+                **cost,
+                "suggestions": [
+                    f"raise step_days (currently {request.step_days}) to sample every Nth day",
+                    "narrow the date range",
+                    "ask for fewer variables, or a single point instead of a lattice",
+                ],
+            },
+        )
+
+    result = await builder.build(spec)
+    if not result.rows:
+        raise HTTPException(status_code=503, detail="no data could be retrieved for that request")
+
+    stem = f"orca_{start:%Y%m%d}_{end:%Y%m%d}"
+    if request.format == "json":
+        return {"summary": result.summary(), "rows": result.rows}
+    if request.format == "csv":
+        return PlainTextResponse(
+            builder.to_csv(result),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{stem}.csv"'},
+        )
+    return Response(
+        content=builder.to_xlsx(result),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{stem}.xlsx"',
+            # So the browser can read the summary without parsing the workbook.
+            "X-Orca-Rows": str(len(result.rows)),
+            "X-Orca-Missing": str(result.gaps),
+        },
+    )
+
+
+@router.get("/research/build/variables", summary="Variables a built file can contain")
+async def build_variables() -> dict[str, Any]:
+    from orca.research import builder
+
+    return {
+        "variables": builder.known_variables(),
+        "max_cells": builder.MAX_CELLS,
+        "max_days": builder.MAX_DAYS,
+        "note": (
+            "Cost is days x points x variables. A request over the limit is refused with the "
+            "figure and a suggested reduction rather than left to die at a proxy timeout."
+        ),
+    }
+
+
 # ------------------------------------------------------------ ground truth
 
 

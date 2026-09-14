@@ -157,7 +157,7 @@ CATALOGUE: tuple[Dataset, ...] = (
         resolution_deg=0.25,
         native_resolution="0.25 deg",
         cadence="3-day composite",
-        coverage="Indian Ocean",
+        coverage="Indian Ocean, 2014-12-31 and earlier",
         access="open",
         licence="INCOIS terms — attribution required",
         provenance=Provenance.LIVE,
@@ -166,7 +166,7 @@ CATALOGUE: tuple[Dataset, ...] = (
             "Microwave, so it sees through cloud where MUR cannot — but far coarser. INCOIS's "
             "TLS chain is incomplete and ORCA ships the missing intermediate certificate; a "
             "plain requests/xarray call from your own machine will fail verification until you "
-            "do the same."
+            "do the same. AN ARCHIVE: coverage ends 2014-12-31."
         ),
         keywords=("sst", "temperature", "incois", "microwave", "india"),
         servable=True,
@@ -180,12 +180,15 @@ CATALOGUE: tuple[Dataset, ...] = (
         resolution_deg=0.25,
         native_resolution="0.25 deg",
         cadence="daily",
-        coverage="Indian Ocean",
+        coverage="Indian Ocean, 2020-05-01 and earlier",
         access="open",
         licence="INCOIS terms — attribution required",
-        provenance=Provenance.LIVE,
+        provenance=Provenance.CACHED,
         endpoint="https://erddap.incois.gov.in/erddap/griddap/incois_oceansat2_datasets",
-        caveats="Indian-mission data; coverage gaps are common outside the core Indian Ocean box.",
+        caveats=(
+            "AN ARCHIVE: coverage ends 2020-05-01, so a recent request returns nothing. "
+            "Indian-mission data; gaps are also common outside the core Indian Ocean box."
+        ),
         keywords=("oceansat", "isro", "india", "sst"),
         servable=True,
     ),
@@ -201,15 +204,17 @@ CATALOGUE: tuple[Dataset, ...] = (
         resolution_deg=0.25,
         native_resolution="0.25 deg",
         cadence="daily",
-        coverage="Indian Ocean",
+        coverage="Indian Ocean, 2023-05-21 and earlier",
         access="open",
         licence="INCOIS terms — attribution required",
-        provenance=Provenance.LIVE,
+        provenance=Provenance.CACHED,
         endpoint="https://erddap.incois.gov.in/erddap/griddap/ascat_daily_datasets",
         caveats=(
-            "Scatterometer winds are unreliable in heavy rain and within roughly 30 km of the "
-            "coast. Direction is the meteorological convention (FROM), the opposite of the "
-            "current convention (TO) — mixing them silently reverses a drift calculation."
+            "AN ARCHIVE, NOT A LIVE FEED: coverage ends 2023-05-21, measured from the server "
+            "rather than assumed. A request for a later date returns nothing, correctly. "
+            "Scatterometer winds are also unreliable in heavy rain and within roughly 30 km of "
+            "the coast, and direction is the meteorological convention (FROM), the opposite of "
+            "the current convention (TO) — mixing them silently reverses a drift calculation."
         ),
         keywords=("wind", "scatterometer", "ascat", "speed", "direction"),
         servable=True,
