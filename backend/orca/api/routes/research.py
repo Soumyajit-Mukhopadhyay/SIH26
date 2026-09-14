@@ -28,8 +28,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from orca import research
 from orca.provenance import utcnow
-from orca.services import research
 
 log = logging.getLogger(__name__)
 

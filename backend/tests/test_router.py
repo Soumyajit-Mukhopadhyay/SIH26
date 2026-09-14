@@ -259,7 +259,9 @@ def test_classify_and_the_router_agree_on_the_vessel() -> None:
 class TestMaritimeWaterMask:
     """Inland cells the Marine API still fills must not become a passage."""
 
-    def test_missing_mask_does_not_invent_a_land_veto(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_missing_mask_does_not_invent_a_land_veto(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr(R, "_water_polygon", lambda: None)
         assert R.in_navigable_water(19.0, 73.0) is None
         assert R._land_reason(19.0, 73.0, wave=1.2) is None

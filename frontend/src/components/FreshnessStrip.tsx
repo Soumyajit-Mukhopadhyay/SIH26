@@ -7,7 +7,7 @@
  */
 
 import { useState, type ReactNode } from 'react';
-import { Activity, ChevronDown } from 'lucide-react';
+import { Activity, BookMarked, ChevronDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { FreshnessReport } from '@/lib/types';
 import { relativeAge } from '@/lib/api';
@@ -24,10 +24,13 @@ const STATUS_STYLES: Record<string, { dot: string; text: string; label: string }
 export function FreshnessStrip({
   freshness,
   tools,
+  onOpenResearch,
 }: {
   freshness: FreshnessReport | null;
   /** Primary tool tabs (Look / Intel / SAR / Passage / Sea view). */
   tools?: ReactNode;
+  /** Opens the researcher workspace — the second audience the PS names. */
+  onOpenResearch?: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -79,10 +82,28 @@ export function FreshnessStrip({
           </>
         )}
 
+        {/* The researcher entry point. Deliberately in the masthead rather than
+            in the tool tabs: it is a different AUDIENCE, not another tool for
+            the same one, and it takes over the screen when opened. */}
+        {onOpenResearch && (
+          <button
+            type="button"
+            onClick={onOpenResearch}
+            className="border-hairline text-ink-2 hover:text-cyan hover:border-cyan/40 ml-auto flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-2xs transition-colors"
+            title="Datasets, subsetting and the learned models"
+          >
+            <BookMarked className="h-3 w-3" aria-hidden />
+            <span className="label">researcher</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="text-ink-2 hover:text-ink-0 ml-auto flex shrink-0 items-center gap-1 text-2xs transition-colors"
+          className={clsx(
+            'text-ink-2 hover:text-ink-0 flex shrink-0 items-center gap-1 text-2xs transition-colors',
+            !onOpenResearch && 'ml-auto',
+          )}
           aria-expanded={open}
         >
           <span className="label">provenance ledger</span>

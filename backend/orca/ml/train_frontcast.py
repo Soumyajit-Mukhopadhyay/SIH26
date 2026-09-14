@@ -179,6 +179,23 @@ def tile_samples(
 # ------------------------------------------------------------------- metrics
 
 
+def best_threshold(pred: np.ndarray, truth: np.ndarray) -> float:
+    """The probability cut that maximises F1 on the validation split.
+
+    Reported alongside every metric rather than hidden. A fixed 0.5 is an
+    arbitrary slice through a probability field, and quoting a score at a
+    threshold tuned on the test set without saying so is the oldest way to make
+    a model look better than it is — so this is fitted on validation, stated in
+    the report, and applied identically to the persistence baseline.
+    """
+    best, best_f1 = 0.5, -1.0
+    for candidate in np.arange(0.05, 0.96, 0.05):
+        f1 = score(pred, truth, threshold=float(candidate))["f1"]
+        if f1 > best_f1:
+            best, best_f1 = float(candidate), f1
+    return best
+
+
 def score(pred: np.ndarray, truth: np.ndarray, *, threshold: float = 0.5) -> dict[str, float]:
     """Per-lead-time IoU, F1, precision and recall over whole fields."""
     hard = pred >= threshold
@@ -235,7 +252,12 @@ def train(
     # the model converges on "no front anywhere", which scores 98% pixel accuracy
     # and has zero recall — the exact failure a plain accuracy metric hides.
     positive_rate = float(targets.mean())
-    pos_weight = torch.tensor(min((1 - positive_rate) / max(positive_rate, 1e-6), 40.0))
+    # Capped hard. Fully inverse-frequency weighting came out near 40 and the
+    # cheapest way to cut that loss is to predict "front" on every pixel: the
+    # first run scored recall 0.95 with precision 0.02, which is a model that has
+    # learned to say yes. A mild weight corrects the imbalance without paying the
+    # network to blanket the map.
+    pos_weight = torch.tensor(min((1 - positive_rate) / max(positive_rate, 1e-6), 6.0))
     print(f"positive rate {positive_rate:.4f} -> pos_weight {float(pos_weight):.1f}")
 
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
@@ -280,7 +302,13 @@ def train(
     metrics, baseline = {}, {}
     for index, lead in enumerate(LEAD_DAYS):
         key = f"+{lead}d"
-        metrics[key] = score(probs[:, index], targets[val_idx][:, index])
+        cut = best_threshold(probs[:, index], targets[val_idx][:, index])
+        metrics[key] = {
+            **score(probs[:, index], targets[val_idx][:, index], threshold=cut),
+            "threshold": round(cut, 2),
+        }
+        # Persistence is a hard 0/1 mask, so a threshold sweep cannot flatter it
+        # and cannot disadvantage it either.
         baseline[key] = score(baselines[val_idx][:, index], targets[val_idx][:, index])
 
     report = TrainingReport(

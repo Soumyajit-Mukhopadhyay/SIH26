@@ -60,6 +60,7 @@ import {
   type OceanMapHandle,
 } from '@/components/OceanMap';
 import { FreshnessStrip } from '@/components/FreshnessStrip';
+import { ResearcherWorkspace } from '@/components/ResearcherWorkspace';
 import { VerdictCard } from '@/components/VerdictCard';
 import { EvidencePanel } from '@/components/EvidencePanel';
 import { ChatPanel } from '@/components/ChatPanel';
@@ -232,6 +233,7 @@ export default function App() {
   const [intro, setIntro] = useState(shouldPlayIntro);
   const [treatment, setTreatment] = useState<TreatmentId>('standard');
   const [treatmentRailOpen, setTreatmentRailOpen] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false);
   const [lookOrigin, setLookOrigin] = useState<{ x: number; y: number } | null>(null);
   const look = TREATMENT_BY_ID[treatment];
   const lookOverlay =
@@ -956,7 +958,10 @@ export default function App() {
         />
       )}
       <TreatmentFilters />
+      {researchOpen && <ResearcherWorkspace onClose={() => setResearchOpen(false)} />}
+
       <FreshnessStrip
+        onOpenResearch={() => setResearchOpen(true)}
         freshness={freshness}
         tools={
           <div

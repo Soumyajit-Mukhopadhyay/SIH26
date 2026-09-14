@@ -129,7 +129,9 @@ class TestVerdictBoundaries:
             assert result.verdict != "NO-GO" or not result.vetoes, (
                 f"{boat.code}: CAPE/legacy pct must not produce a hard veto"
             )
-            assert not any("convective" in v.lower() or "lightning" in v.lower() for v in result.vetoes)
+            assert not any(
+                "convective" in v.lower() or "lightning" in v.lower() for v in result.vetoes
+            )
             assert result.verdict in ("GO", "CAUTION")
 
     def test_the_same_conditions_can_be_go_for_a_trawler_and_no_go_for_a_canoe(self):
@@ -148,9 +150,7 @@ class TestVerdictBoundaries:
 class TestRefusalToGuess:
     def test_missing_wave_data_is_unverifiable_not_calm(self):
         # The whole point: "we could not measure it" must never render as safe.
-        result = assess(
-            wave_m=None, wind_kn=8.0, visibility_km=10.0, lightning_pct=0.0, loa_m=8.2
-        )
+        result = assess(wave_m=None, wind_kn=8.0, visibility_km=10.0, lightning_pct=0.0, loa_m=8.2)
         assert result.verdict == "UNVERIFIABLE"
         assert result.escalate is True
         assert "wave height" in result.escalation_message

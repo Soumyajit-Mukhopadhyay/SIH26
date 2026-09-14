@@ -734,7 +734,8 @@ def match(intent: Intent, *, limit: int = 8) -> list[Match]:
 
         if intent.kinds and dataset.kind in intent.kinds:
             score += 1.5
-            why.append(f"is a {dataset.kind} product, which the request asked for")
+            article = "an" if dataset.kind[0] in "aeiou" else "a"
+            why.append(f"is {article} {dataset.kind} product, which the request asked for")
 
         # A time range the dataset cannot cover is a hard penalty, not a filter:
         # the researcher is better served by seeing it ranked low with the reason

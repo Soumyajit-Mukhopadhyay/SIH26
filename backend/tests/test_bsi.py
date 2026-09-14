@@ -71,7 +71,9 @@ def test_steepness_derived_from_period_labelled():
     assert result.status in {"clear", "triggered"}
     assert "derived_deep_water" in result.processing_method
     assert result.decision_grade is False  # derived, not SWAN Ss
-    assert any("not identical" in lim.lower() or "derived" in lim.lower() for lim in result.limitations)
+    assert any(
+        "not identical" in lim.lower() or "derived" in lim.lower() for lim in result.limitations
+    )
 
 
 def test_significant_steepness_formula():

@@ -56,3 +56,10 @@ backend/data/cache/
 
 # Ad-hoc browser probes; the committed loop is frontend/shot.mjs.
 *.local.mjs
+
+# Trained model weights and the SST training archive. Weights are a build
+# artefact of `python -m orca.ml.train_frontcast`, and the archive is ~150 days
+# of MUR SST that anyone can refetch from a public endpoint — neither belongs in
+# git history.
+backend/data/models/
+backend/data/training/

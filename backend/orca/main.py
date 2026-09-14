@@ -162,12 +162,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Register zero-auth IMD CAP (and the keyed JSON adapter, which stays
     # dormant without IMD_API_KEY) so /freshness lists them from boot.
-    from orca.sources import imd as _imd  # noqa: F401
-
     # The trip monitor. Started here so it lives exactly as long as the app, and
     # stopped in the teardown below — an orphaned poll loop keeps hitting the
     # upstream APIs after a reload and spends a metered budget on nothing.
     from orca.jobs.monitor import monitor
+    from orca.sources import imd as _imd  # noqa: F401
 
     monitor.start()
     app.state.infra["monitor"] = monitor.status()

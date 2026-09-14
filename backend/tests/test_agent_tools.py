@@ -40,9 +40,7 @@ def test_conditions_are_ordered_before_the_verdict() -> None:
 
     assert TOOL_ORDER.index("fetch_marine_conditions") < TOOL_ORDER.index("assess_risk")
     assert TOOL_ORDER.index("assess_risk") < TOOL_ORDER.index("plan_route")
-    assert TOOL_ORDER.index("fetch_forecast_window") < TOOL_ORDER.index(
-        "assess_forecast_risk"
-    )
+    assert TOOL_ORDER.index("fetch_forecast_window") < TOOL_ORDER.index("assess_forecast_risk")
 
 
 def test_ordered_puts_unknown_names_last_rather_than_dropping_them() -> None:
@@ -108,4 +106,6 @@ def test_the_seven_problem_statement_queries_select_the_required_tools() -> None
 
     for question, required in cases.items():
         selected = set(split_heuristic(question).tools)
-        assert required <= selected, f"{question!r} selected {selected}, missing {required - selected}"
+        assert required <= selected, (
+            f"{question!r} selected {selected}, missing {required - selected}"
+        )
