@@ -801,8 +801,20 @@ def snippet(dataset: Dataset, intent: Intent) -> str:
     )
 
 
-async def discover(question: str, *, limit: int = 8) -> dict[str, Any]:
-    """Natural language in, ranked real datasets out."""
+async def discover(question: str, *, limit: int = 8, federate: bool = True) -> dict[str, Any]:
+    """Natural language in, ranked real datasets out.
+
+    Two tiers, kept visibly separate:
+
+    * **Curated** — the fifteen datasets ORCA has integrated, each carrying
+      caveats a person wrote and, for ten of them, a subsetting path ORCA serves
+      itself.
+    * **Federated** — live search across the public ERDDAP network, which is
+      thousands of datasets nobody here has reviewed.
+
+    Merging them into one list would imply the same level of vetting for both.
+    A researcher deserves to know which rows somebody checked.
+    """
     heuristic = parse_heuristic(question)
     model = await parse_with_model(question)
     intent = merge(model, heuristic)
@@ -814,12 +826,34 @@ async def discover(question: str, *, limit: int = 8) -> dict[str, Any]:
         )
 
     matches = match(intent, limit=limit)
+
+    federated: dict[str, Any] | None = None
+    if federate:
+        from orca.research import federation
+
+        # Search terms are the parsed variables when we have them, because
+        # "wave_height" matches far better against dataset titles than the
+        # user's whole sentence does. The raw question is the fallback.
+        terms = " ".join(v.replace("_", " ") for v in intent.variables) or question
+        try:
+            federated = await federation.search(
+                terms=terms,
+                bbox=intent.bbox,
+                start=intent.start,
+                end=intent.end,
+                limit=limit * 2,
+            )
+        except Exception as exc:  # noqa: BLE001 — federation is an enhancement
+            log.warning("federated search failed: %s", exc)
+            federated = None
+
     return {
         "catalogue_version": CATALOGUE_VERSION,
         "question": question,
         "intent": intent.describe(),
         "parsed_by": "llm+heuristic" if model else "heuristic",
         "matches": [m.describe() for m in matches],
+        "federated": federated,
         "snippet": snippet(matches[0].dataset, intent) if matches else None,
         "note": (
             "A language model parsed the request; the datasets were selected by deterministic "

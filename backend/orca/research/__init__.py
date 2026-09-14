@@ -18,6 +18,7 @@ over a registry of sources ORCA has actually integrated.
 
 from __future__ import annotations
 
+from orca.research import federation
 from orca.research.catalogue import (
     BY_ID,
     CATALOGUE,
@@ -44,6 +45,7 @@ __all__ = [
     "Intent",
     "Variable",
     "discover",
+    "federation",
     "match",
     "merge",
     "parse_heuristic",

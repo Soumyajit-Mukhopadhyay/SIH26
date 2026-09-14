@@ -238,6 +238,61 @@ def _citation(entry: research.Dataset, valid_time: datetime) -> str:
     )
 
 
+# ---------------------------------------------------------------- federation
+
+
+@router.get("/research/federation/servers", summary="Which public data servers ORCA searches")
+async def federation_servers() -> dict[str, Any]:
+    from orca.research import federation
+
+    return federation.servers_report()
+
+
+@router.get("/research/federation/search", summary="Search the public ERDDAP network")
+async def federation_search(
+    q: str = Query(min_length=2, max_length=200, description="Free-text search"),
+    west: float | None = None,
+    south: float | None = None,
+    east: float | None = None,
+    north: float | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = Query(default=30, ge=1, le=100),
+) -> dict[str, Any]:
+    """Live search across every reachable public ERDDAP server.
+
+    ORCA stores none of this. The response is identifiers and subsetting URLs on
+    the providers' own servers — mirroring other institutions' archives would be
+    a licensing problem, a storage problem and a staleness problem at once.
+    """
+    from orca.research import federation
+
+    bbox = None
+    if None not in (west, south, east, north):
+        bbox = (float(west), float(south), float(east), float(north))  # type: ignore[arg-type]
+    return await federation.search(terms=q, bbox=bbox, start=start, end=end, limit=limit)
+
+
+@router.get("/research/federation/preview", summary="A few real rows from a federated dataset")
+async def federation_preview(
+    server: str = Query(description="Server key from /research/federation/servers"),
+    dataset_id: str = Query(min_length=1, max_length=120),
+    protocol: str = Query(default="tabledap", pattern="^(griddap|tabledap)$"),
+    rows: int = Query(default=40, ge=1, le=60),
+) -> dict[str, Any]:
+    """Pull a handful of real values so the shape and units are visible.
+
+    Hard row cap, and nothing is stored: a preview exists so a researcher can
+    see what they would get before committing to a download, not to become a
+    quiet mirror of somebody else's archive.
+    """
+    from orca.research import federation
+
+    return await federation.preview(
+        server_key=server, dataset_id=dataset_id, protocol=protocol, rows=rows
+    )
+
+
 # ---------------------------------------------------------------- the models
 
 

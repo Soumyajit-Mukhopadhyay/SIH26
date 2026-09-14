@@ -34,6 +34,9 @@ import {
   Copy,
   Database,
   Download,
+  ExternalLink,
+  Eye,
+  Globe,
   Loader2,
   Search,
   Sparkles,
@@ -80,11 +83,37 @@ interface Intent {
   assumptions: string[];
 }
 
+export interface FederatedDataset {
+  id: string;
+  dataset_id: string;
+  title: string;
+  provider: string;
+  server: string;
+  server_key: string;
+  protocol: string;
+  summary: string;
+  endpoint: string;
+  info: string;
+  coverage_checked: boolean;
+  also_on: string[];
+  curated: false;
+  caveats: string;
+}
+
+interface Federated {
+  servers_queried: number;
+  servers_responding: number;
+  found: number;
+  datasets: FederatedDataset[];
+  note: string;
+}
+
 interface DiscoverResult {
   question: string;
   intent: Intent;
   parsed_by: string;
   matches: ResearchDataset[];
+  federated: Federated | null;
   snippet: string | null;
   note: string;
 }
@@ -267,6 +296,115 @@ function DatasetCard({
               <span className="data">{intent.bbox.map((v) => v.toFixed(1)).join(', ')}</span>
               {intent.start ? <> from <span className="data">{intent.start}</span></> : null}
             </p>
+          )}
+        </div>
+      )}
+    </article>
+  );
+}
+
+/* ------------------------------------------------------ federated results */
+
+/**
+ * A dataset on somebody else's server.
+ *
+ * Rendered differently from a curated entry on purpose. The curated rows carry
+ * caveats a person wrote; these carry the provider's own summary and nothing
+ * more, and showing them identically would imply a level of vetting that does
+ * not exist. Hence the muted treatment, the "not reviewed" line, and the
+ * separate section heading.
+ */
+function FederatedCard({ dataset }: { dataset: FederatedDataset }) {
+  const [open, setOpen] = useState(false);
+  const [preview, setPreview] = useState<{ ok: boolean; csv?: string; error?: string; hint?: string; rows_returned?: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchPreview = async () => {
+    setLoading(true);
+    setPreview(null);
+    try {
+      const params = new URLSearchParams({
+        server: dataset.server_key,
+        dataset_id: dataset.dataset_id,
+        protocol: dataset.protocol,
+        rows: '25',
+      });
+      const response = await fetch(`/api/research/federation/preview?${params}`);
+      setPreview(await response.json());
+    } catch (cause) {
+      setPreview({ ok: false, error: cause instanceof Error ? cause.message : 'preview failed' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <article className="border-hairline bg-abyss-1/60 hover:border-hairline-strong rounded border transition-colors">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-start gap-2.5 px-3 py-2 text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-ink-1 text-xs font-medium">{dataset.title}</span>
+            <Chip className="border-hairline text-ink-3">{dataset.protocol}</Chip>
+            {dataset.coverage_checked && (
+              <Chip className="text-live border-live/30 bg-live/8">covers your box</Chip>
+            )}
+          </div>
+          <div className="text-ink-3 mt-0.5 flex flex-wrap items-center gap-x-3 text-2xs">
+            <span>{dataset.provider}</span>
+            <span className="data">{dataset.server}</span>
+            {dataset.also_on.length > 0 && <span>also on {dataset.also_on.length} more</span>}
+          </div>
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-hairline space-y-2 border-t px-3 py-2.5">
+          <p className="text-ink-2 text-2xs leading-relaxed">{dataset.summary || 'No summary provided.'}</p>
+          <p className="text-amber flex items-start gap-1.5 text-2xs leading-relaxed">
+            <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden />
+            <span>{dataset.caveats}</span>
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={fetchPreview}
+              disabled={loading}
+              className="border-cyan/40 bg-cyan/12 text-cyan hover:bg-cyan/20 flex items-center gap-1 rounded border px-2 py-0.5 text-2xs transition-colors disabled:opacity-40"
+            >
+              {loading ? <Loader2 className="h-2.5 w-2.5 animate-spin" aria-hidden /> : <Eye className="h-2.5 w-2.5" aria-hidden />}
+              preview live rows
+            </button>
+            <a
+              href={dataset.info}
+              target="_blank"
+              rel="noreferrer"
+              className="border-hairline text-ink-2 hover:text-cyan hover:border-cyan/40 flex items-center gap-1 rounded border px-2 py-0.5 text-2xs transition-colors"
+            >
+              <ExternalLink className="h-2.5 w-2.5" aria-hidden />
+              provider metadata
+            </a>
+            <CopyButton text={dataset.endpoint} label="copy endpoint" />
+          </div>
+
+          {preview && (
+            preview.ok ? (
+              <div className="border-hairline rounded border">
+                <div className="border-hairline text-ink-3 border-b px-2 py-1 text-2xs">
+                  {preview.rows_returned} live rows, fetched from the provider and not stored
+                </div>
+                <pre className="data text-ink-1 max-h-48 overflow-auto px-2 py-1.5 text-2xs leading-relaxed">
+                  {preview.csv}
+                </pre>
+              </div>
+            ) : (
+              <p className="text-ink-3 text-2xs leading-relaxed">
+                Preview unavailable: {preview.error}. {preview.hint ?? ''}
+              </p>
+            )
           )}
         </div>
       )}
@@ -633,6 +771,31 @@ export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
                   />
                 ))}
               </div>
+
+              {/* The second tier, deliberately below and visually quieter than the
+                  curated matches. Same list, same weight would imply the same
+                  vetting. */}
+              {tab === 'discover' && result?.federated && result.federated.found > 0 && (
+                <div className="mt-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Globe className="text-ink-3 h-3 w-3" aria-hidden />
+                    <span className="label">
+                      {result.federated.found} more on the public ERDDAP network
+                    </span>
+                    <Chip className="border-hairline text-ink-3">
+                      {result.federated.servers_responding}/{result.federated.servers_queried} servers
+                    </Chip>
+                  </div>
+                  <p className="text-ink-3 mt-1 max-w-3xl text-2xs leading-relaxed">
+                    {result.federated.note}
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {result.federated.datasets.map((dataset) => (
+                      <FederatedCard key={dataset.id} dataset={dataset} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {result?.snippet && tab === 'discover' && (
                 <div className="border-hairline bg-abyss-1 mt-4 rounded border">

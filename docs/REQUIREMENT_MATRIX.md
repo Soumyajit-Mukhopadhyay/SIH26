@@ -48,6 +48,8 @@ Unit tests are noted where they pin behaviour that is hard to see from outside �
 | P1-9 | Visual treatments with a performance guard | **Demonstrable** | Seven treatments. The guard measures median frame time and turns a treatment **off** when it cannot hold the budget, rather than displaying a number. |
 | P1-10 | Honest degradation when a source fails | **Demonstrable** | The freshness strip shows sources up/down; a failed tool gets a red row in the trace with its error; the deterministic endpoints keep working when the agent plane fails. |
 | P1-11 | Replayable agent traces | **Partial** | `GET /agent/runs/{id}` replays a full trace, but from an in-process ring buffer — traces do not survive a restart. The `agent_runs`/`agent_steps` tables are not wired. |
+| P1-13 | A researcher-facing data catalogue and NL discovery | **Demonstrable** | Open the Researcher workspace from the masthead. Ask in prose: the panel shows the variables, box and dates it parsed AND every assumption, then ranks 15 real datasets. A language model parses; deterministic code matches, so it cannot name a dataset that does not exist — `tests/test_research.py` pins that boundary. CSV export carries a provenance header and a citation line. |
+| P1-14 | A trained deep-learning model, with its skill published | **Partial** | `GET /ml/models` and the workspace's Models tab. FrontCast (211k params: per-day CNN encoder → temporal transformer over the day axis → three independent sigmoid heads) forecasts thermal fronts at +1/+2/+3 days from 5 days of MUR SST, trained on 151 days over the Indian EEZ. **Its measured skill is shown beside a persistence baseline, and where it loses, the UI says so in amber.** See the honest note below. |
 | P1-12 | Multi-source cross-validation | **Demonstrable** | `GET /validation/point` aligns valid times and units for model-vs-MUR SST, Open-Meteo-vs-NASA POWER wind, and Open-Meteo-vs-CMEMS significant wave height. Provider uncertainty is used where supplied; otherwise the response labels ORCA's cross-model tolerance explicitly. |
 
 ## P2 — planned, and where they actually stand
@@ -93,6 +95,25 @@ Stated so they are not mistaken for gaps:
 - **The Gerstner sea surface is clamped at a steepness of 0.85.** Above that the
   parameterisation self-intersects, so a very steep sea is drawn gentler than it
   is; the panel reports the gap rather than hiding it.
+- **FrontCast does not yet reliably beat persistence.** "Tomorrow's fronts are
+  today's fronts" is a strong forecast at one day, and the model is trained on
+  151 days — a single season. The result is reported per lead time with the
+  baseline beside it, and the interface marks a loss in amber rather than
+  showing the model's score alone. A score published without the baseline it
+  must beat is a number chosen to look good; this is the opposite arrangement,
+  and it is deliberate. Two things would most likely change it: several years of
+  archive instead of one season, and adding surface current as an input channel
+  so the model can see what actually advects a front.
+- **TerraMind is not wired in.** IBM/ESA's geospatial foundation model is
+  Apache 2.0 with downloadable weights (tiny 212 MB → large 3.8 GB), and it is
+  the right model for coastal Sentinel-1 SAR segmentation — but it is an image
+  encoder and cannot forecast sea state, and there is no labelled Indian-EEZ
+  coastal dataset to train its heads on. Plan in `docs/NEXT_ADDONS_PLAN.md`.
+- **MOSDAC is blocked on the account, not on engineering.** Its public THREDDS
+  server serves only ISRO GSICS inter-calibration products, not ocean fields,
+  and the portal is behind Keycloak. The supplied account returns "temporarily
+  disabled", which is Keycloak's brute-force lockout wording rather than an
+  administrative ban.
 - **Free-tier LLM slugs move.** Three of four providers were dead at one point in
   development for three unrelated reasons. `/agent/providers` reports which one
   answered, and the deterministic verdict does not depend on any of them.

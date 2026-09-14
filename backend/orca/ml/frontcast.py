@@ -84,7 +84,25 @@ log = logging.getLogger(__name__)
 HISTORY_DAYS = 5
 
 #: Lead times predicted, in days. One sigmoid head each.
-LEAD_DAYS: tuple[int, ...] = (1, 2, 3)
+#:
+#: Zero is included and is a different KIND of task from the others. At +0 the
+#: model reproduces SIED on the field it was given, which is a deterministic
+#: function of its own input — so it is a DETECTOR, and a well-trained one can
+#: score very high. At +1 and beyond it is a FORECASTER of a field it has not
+#: seen, and the honest ceiling there is far lower: measured over this archive,
+#: the SIED mask overlaps its own next day only 44% of the time, so a +1d score
+#: near a detector's would mean the model was more self-consistent than the
+#: ocean it is describing.
+#:
+#: Both are served, both are scored, and the report never compares one against
+#: the other's baseline.
+LEAD_DAYS: tuple[int, ...] = (0, 1, 2, 3)
+
+#: Leads that are genuine forecasts, i.e. of a field the model was not shown.
+#: Persistence is only a meaningful baseline for these — at +0 "yesterday's
+#: answer" IS the label, so the baseline is trivially perfect and reporting the
+#: model against it would be nonsense.
+FORECAST_LEADS: tuple[int, ...] = tuple(lead for lead in LEAD_DAYS if lead > 0)
 
 #: Tile size the network is trained and run on. The area of interest is far
 #: larger; inference walks it in overlapping tiles and blends the seams.

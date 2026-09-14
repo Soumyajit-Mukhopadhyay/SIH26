@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from typing import Any, Iterable
+from typing import Any
 
 from orca.config import get_settings
 from orca.provenance import Citation, Evidence, Freshness, Provenance, Provider, utcnow

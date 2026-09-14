@@ -32,6 +32,7 @@ import numpy as np
 
 from orca.ml import FRONTCAST_VERSION
 from orca.ml.frontcast import (
+    FORECAST_LEADS,
     FRONT_DILATION,
     HISTORY_DAYS,
     LEAD_DAYS,
@@ -306,10 +307,16 @@ def train(
         metrics[key] = {
             **score(probs[:, index], targets[val_idx][:, index], threshold=cut),
             "threshold": round(cut, 2),
+            "task": "detection" if lead == 0 else "forecast",
         }
-        # Persistence is a hard 0/1 mask, so a threshold sweep cannot flatter it
-        # and cannot disadvantage it either.
-        baseline[key] = score(baselines[val_idx][:, index], targets[val_idx][:, index])
+        # Persistence only means something for a genuine forecast. At +0 the
+        # "baseline" would be the label compared with itself — a perfect 1.0 the
+        # model can never beat and was never competing with. Publishing that row
+        # would make a working detector look like a failure.
+        if lead in FORECAST_LEADS:
+            # A hard 0/1 mask, so a threshold sweep can neither flatter nor
+            # disadvantage it.
+            baseline[key] = score(baselines[val_idx][:, index], targets[val_idx][:, index])
 
     report = TrainingReport(
         version=FRONTCAST_VERSION,
