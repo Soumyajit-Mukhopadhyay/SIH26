@@ -622,6 +622,60 @@ def sample_cache_status() -> dict[str, Any]:
     return {"entries": len(_sample_cache), "live": live, "ttl_s": _SAMPLE_TTL_S}
 
 
+#: How many times to re-issue a batch that came back HTTP 200 with a body that
+#: is not JSON, and how long to wait between attempts.
+#:
+#: Open-Meteo answers `200 Unexpected error while streaming data:
+#: allEndpointsUnavailable` when its own backend is briefly out. That is a
+#: transient failure wearing a success code, so ORCA's HTTP client -- which
+#: retries on status -- never retried it, and `sample_conditions` dropped the
+#: whole batch. The router then reported "visibility, wind_speed and
+#: convective_energy missing at every one of 180 nodes" and costed the passage on
+#: wave height alone: a route that looks planned and was not.
+_BATCH_JSON_RETRIES = 3
+_BATCH_RETRY_DELAY_S = 1.5
+
+
+async def _fetch_batch_json(source: _OpenMeteoBase, params: dict[str, Any], *, api: str):
+    """Fetch a multi-point batch, retrying a 200 whose body is not JSON.
+
+    Returns the parsed payload, or None when every attempt failed. None means
+    "we do not know", and the caller leaves those points unset rather than
+    caching a false absence.
+    """
+    import asyncio
+
+    for attempt in range(1, _BATCH_JSON_RETRIES + 1):
+        result = await source.fetch(source.url, params=params, conditional=False)
+        if not result.ok:
+            log.warning("routing sample batch (%s) failed: %s", api, result.error)
+            return None
+        try:
+            return result.json()
+        except ValueError as exc:
+            body = (getattr(result, "text", "") or "")[:120]
+            if attempt == _BATCH_JSON_RETRIES:
+                log.warning(
+                    "routing sample batch (%s) returned 200 with a non-JSON body %d times: "
+                    "%s (%s). Giving up on this batch; the affected variables will be missing "
+                    "rather than wrong.",
+                    api,
+                    attempt,
+                    exc,
+                    body,
+                )
+                return None
+            log.info(
+                "routing sample batch (%s) 200 with a non-JSON body (%s) — retrying %d/%d",
+                api,
+                body,
+                attempt,
+                _BATCH_JSON_RETRIES,
+            )
+            await asyncio.sleep(_BATCH_RETRY_DELAY_S)
+    return None
+
+
 async def sample_conditions(
     lats: list[float],
     lons: list[float],
@@ -700,14 +754,8 @@ async def sample_conditions(
                 "cell_selection": source.cell_selection,
             }
             budget.charge(len(chunk_lats))
-            result = await source.fetch(source.url, params=params, conditional=False)
-            if not result.ok:
-                log.warning("routing sample batch (%s) failed: %s", api, result.error)
-                continue
-            try:
-                payload = result.json()
-            except ValueError as exc:
-                log.warning("routing sample batch (%s) unparseable: %s", api, exc)
+            payload = await _fetch_batch_json(source, params, api=api)
+            if payload is None:
                 continue
 
             entries = payload if isinstance(payload, list) else [payload]

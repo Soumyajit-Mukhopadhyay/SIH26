@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -224,4 +225,69 @@ async def datasets() -> dict[str, object]:
                 "role": "live",
             },
         ],
+    }
+
+
+# --------------------------------------------------------------- harbour board
+
+
+@router.get("/harbours/board", summary="Verdict at every fishing harbour, by boat class")
+async def harbour_board(
+    state: str | None = Query(default=None, description="Restrict to one maritime state or UT."),
+) -> dict[str, Any]:
+    """Which stretches of coast are unsafe today, and for whom.
+
+    A fisheries officer does not want one boat's verdict. They want the fleet's,
+    laid out along their coast. This runs the same deterministic rule engine that
+    answers a point query at every harbour on the Department of Fisheries' PMMSY
+    register, for all five boat classes, and reports contiguous runs of the same
+    verdict — because "traditional craft should not sail anywhere between Kochi
+    and Mangaluru" is the form an advisory actually takes.
+
+    No new model and no new thresholds. The same engine, run across a register
+    instead of at one coordinate.
+    """
+    from orca.services import harbourboard
+
+    rows = await harbourboard.board(state=state)
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"no harbours on the register for {state!r}; "
+                f"see GET /harbours for the {len(harbourboard.HARBOURS)} available"
+            ),
+        )
+    return harbourboard.describe(rows)
+
+
+@router.get("/harbours", summary="The fishing-harbour register")
+async def harbour_register() -> dict[str, Any]:
+    """The register itself, without running the engine over it."""
+    from orca.services.harbours import (
+        HARBOURS,
+        PMMSY_CITATION,
+        POSITION_CITATION,
+        STATES,
+        UNRESOLVED,
+    )
+
+    return {
+        "count": len(HARBOURS),
+        "states": list(STATES),
+        "harbours": [
+            {
+                "name": h.name,
+                "district": h.district,
+                "state": h.state,
+                "coast": h.coast,
+                "lat": h.lat,
+                "lon": h.lon,
+                "position_proxy": h.position_proxy,
+            }
+            for h in HARBOURS
+        ],
+        "unresolved": UNRESOLVED,
+        "source": PMMSY_CITATION.model_dump(mode="json"),
+        "positions": POSITION_CITATION.model_dump(mode="json"),
     }
