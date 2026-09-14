@@ -10,11 +10,12 @@
  * provider's own explanation — a monthly composite has no value on a Tuesday,
  * and that is a different fact from "no data".
  *
- * The cost line is shown before the button, not after a timeout. `plan()`
- * separates the two kinds of request the builder makes: a range variable is one
- * call for the whole span, a griddap variable is one per day. Ninety days of
- * wave height is a single request and ninety days of MUR SST is ninety, and a
- * researcher choosing between them deserves to see that before they wait.
+ * An oversized request comes back as a 413 carrying its own figures — cells
+ * against the limit, and which knob to turn — and those are rendered instead of
+ * "request failed". There is deliberately no cost preview before the button:
+ * costing a request accurately means running `plan()` server-side, and adding a
+ * round trip to tell someone their request is fine is worse than letting them
+ * press the button.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -43,17 +44,6 @@ interface BuildSummary {
     caveats: string;
     columns?: string[];
   }[];
-}
-
-interface BuildCost {
-  days: number;
-  points: number;
-  cells: number;
-  upstream_requests: number;
-  range_variables: string[];
-  per_day_variables: string[];
-  within_limits: boolean;
-  cost_note: string;
 }
 
 /** Sea areas worth offering as one click. Each is a real working box rather
@@ -85,7 +75,6 @@ export function DatasetBuilder({
   const [points, setPoints] = useState(1);
   const [stepDays, setStepDays] = useState(1);
 
-  const [cost, setCost] = useState<BuildCost | null>(null);
   const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
   const [summary, setSummary] = useState<BuildSummary | null>(null);
   const [busy, setBusy] = useState(false);
@@ -142,7 +131,6 @@ export function DatasetBuilder({
       const data = await response.json();
       setRows(data.rows as Record<string, unknown>[]);
       setSummary(data.summary as BuildSummary);
-      setCost(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The build failed.');
       setRows(null);
@@ -338,8 +326,6 @@ export function DatasetBuilder({
           )}
           CSV
         </button>
-
-        {cost ? <span className="text-ink-3 text-2xs">{cost.cost_note}</span> : null}
       </div>
 
       {error ? (
