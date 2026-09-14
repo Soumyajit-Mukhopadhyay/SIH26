@@ -123,6 +123,93 @@ if (hasResearcher) {
     log(cite > 0, "a dataset carries a copyable citation, not just a file");
   }
 
+  // ---- build a dataset: the tab that answers "can I get this as a file" ----
+  const buildTab = page.getByRole('button', { name: /build a dataset/i }).first();
+  if (await buildTab.count()) {
+    await buildTab.click();
+    await page.waitForTimeout(2500);
+
+    const vars = apiCalls.filter((c) => c.url?.includes('/research/build/variables')).at(-1);
+    const offered = vars?.body?.variables ?? [];
+    log(
+      offered.length >= 13,
+      'the builder offers the full variable set',
+      `${offered.length} variables`,
+    );
+
+    const preview = page.getByRole('button', { name: /build and preview/i }).first();
+    log((await preview.count()) > 0, 'the builder has a preview control');
+
+    if (await preview.count()) {
+      await preview.click();
+      await page.waitForTimeout(30000);
+
+      const built = apiCalls.filter((c) => c.url?.includes('/research/build')).at(-1);
+      log(built?.status === 200, 'the dataset builds', `HTTP ${built?.status}`);
+
+      if (built?.body?.rows?.length) {
+        const rows = built.body.rows;
+        const summary = built.body.summary;
+        const table = await page.locator('table').count();
+        log(table > 0, 'the rows are rendered as a table in the page');
+
+        // The preview must show real values, not just headers.
+        const firstVar = summary.variables[0];
+        const firstValue = rows.find((r) => r[firstVar] != null)?.[firstVar];
+        const shown = await page.textContent('body');
+        log(
+          firstValue != null && shown.includes(String(firstValue)),
+          'a real value from the payload is visible in the table',
+          `${firstVar} = ${firstValue}`,
+        );
+
+        // Fill rate: the point of the whole change.
+        const filled = summary.variables.filter(
+          (v) => (summary.missing_by_variable[v] ?? 0) < summary.rows,
+        );
+        log(
+          filled.length >= Math.min(3, summary.variables.length),
+          'the requested columns actually contain data',
+          `${filled.length}/${summary.variables.length} columns non-empty over ${summary.rows} rows`,
+        );
+
+        // Provenance must cover every delivered column, not just the ERDDAP one.
+        const attributed = new Set(
+          (summary.datasets ?? []).flatMap((d) => d.columns ?? []),
+        );
+        const unattributed = summary.variables.filter((v) => !attributed.has(v));
+        log(
+          unattributed.length === 0,
+          'every delivered column is attributed to a source',
+          unattributed.length ? `unattributed: ${unattributed.join(', ')}` : 'all attributed',
+        );
+        log(
+          (summary.datasets ?? []).length >= 2,
+          'more than one provider is cited',
+          (summary.datasets ?? []).map((d) => d.provider).join(' + '),
+        );
+      }
+
+      // And the actual file.
+      const [dl] = await Promise.all([
+        page.waitForEvent('download', { timeout: 60000 }).catch(() => null),
+        page.getByRole('button', { name: /^CSV$/i }).first().click(),
+      ]);
+      log(dl !== null, 'the CSV downloads', dl ? await dl.suggestedFilename() : 'no download event');
+      if (dl) {
+        const path = await dl.path();
+        const text = path ? (await import('node:fs')).readFileSync(path, 'utf8') : '';
+        log(
+          text.includes('# source:') && text.split(String.fromCharCode(10)).length > 5,
+          'the downloaded CSV carries its provenance preamble',
+          `${text.split(String.fromCharCode(10)).length} lines`,
+        );
+      }
+    }
+  } else {
+    log(false, 'the researcher workspace has a dataset builder tab');
+  }
+
   // Escape must work: it is a full-screen overlay and the close button is one
   // small target in a corner. If this leaves the overlay up, every check after
   // it fails on an intercepted click, which is exactly what happened.

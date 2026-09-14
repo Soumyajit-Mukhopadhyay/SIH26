@@ -297,7 +297,11 @@ async def federation_preview(
 
 
 class BuildRequestBody(BaseModel):
-    variables: list[str] = Field(min_length=1, max_length=8)
+    # 16, not 8. The builder delivers 13 variables now and twelve of them come
+    # from two range endpoints, so asking for all of them is two requests per
+    # point rather than thirteen per day. The cap that matters is MAX_CELLS,
+    # which plan() enforces with the actual figure.
+    variables: list[str] = Field(min_length=1, max_length=16)
     west: float = Field(default=60.0, ge=-180, le=180)
     south: float = Field(default=0.0, ge=-90, le=90)
     east: float = Field(default=100.0, ge=-180, le=180)

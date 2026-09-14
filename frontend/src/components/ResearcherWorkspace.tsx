@@ -44,6 +44,7 @@ import {
   X,
 } from 'lucide-react';
 import { clsx } from 'clsx';
+import { DatasetBuilder } from '@/components/DatasetBuilder';
 
 /* ------------------------------------------------------------------ types */
 
@@ -677,7 +678,9 @@ export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
-  const [tab, setTab] = useState<'discover' | 'catalogue' | 'ground truth' | 'models'>('discover');
+  const [tab, setTab] = useState<
+    'discover' | 'catalogue' | 'build a dataset' | 'ground truth' | 'models'
+  >('discover');
 
   // Escape closes it. This is a `fixed inset-0 z-50` overlay covering the whole
   // console, so without this the only way out is one small button in a corner —
@@ -780,7 +783,9 @@ export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
           Ask in plain language. ORCA returns datasets it has actually integrated.
         </span>
         <div className="ml-auto flex items-center gap-1">
-          {(['discover', 'catalogue', 'ground truth', 'models'] as const).map((key) => (
+          {(
+            ['discover', 'catalogue', 'build a dataset', 'ground truth', 'models'] as const
+          ).map((key) => (
             <button
               key={key}
               type="button"
@@ -810,6 +815,11 @@ export function ResearcherWorkspace({ onClose }: { onClose: () => void }) {
             <GroundTruth />
           ) : tab === 'models' ? (
             <ModelCard status={models} />
+          ) : tab === 'build a dataset' ? (
+            // The box from the discover tab carries over, so "chlorophyll in the
+            // Bay of Bengal" and then "build me that as a spreadsheet" is two
+            // clicks rather than a coordinate the researcher has to retype.
+            <DatasetBuilder bbox={result?.intent.bbox ?? null} />
           ) : (
             <>
               {tab === 'discover' && (
