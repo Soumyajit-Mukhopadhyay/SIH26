@@ -7,7 +7,7 @@
  */
 
 import { useState, type ReactNode } from 'react';
-import { Activity, BookMarked, ChevronDown } from 'lucide-react';
+import { Activity, Anchor, BookMarked, ChevronDown } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { FreshnessReport } from '@/lib/types';
 import { relativeAge } from '@/lib/api';
@@ -25,12 +25,16 @@ export function FreshnessStrip({
   freshness,
   tools,
   onOpenResearch,
+  onOpenHarbours,
 }: {
   freshness: FreshnessReport | null;
   /** Primary tool tabs (Look / Intel / SAR / Passage / Sea view). */
   tools?: ReactNode;
   /** Opens the researcher workspace — the second audience the PS names. */
   onOpenResearch?: () => void;
+  /** Opens the harbour advisory board — coastal authorities and disaster
+   *  management, who need a coastline rather than a point. */
+  onOpenHarbours?: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -82,14 +86,34 @@ export function FreshnessStrip({
           </>
         )}
 
-        {/* The researcher entry point. Deliberately in the masthead rather than
-            in the tool tabs: it is a different AUDIENCE, not another tool for
-            the same one, and it takes over the screen when opened. */}
+        {/* Two entry points for two audiences, both in the masthead rather than
+            in the tool tabs: neither is another tool for the fisherman holding
+            the phone, and both take over the screen when opened. The harbour
+            board is the only view in ORCA that is about a coastline rather than
+            a point, which is precisely why it cannot live in a side panel. */}
+        {onOpenHarbours && (
+          <button
+            type="button"
+            onClick={onOpenHarbours}
+            className={clsx(
+              'border-hairline text-ink-2 hover:text-cyan hover:border-cyan/40 flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-2xs transition-colors',
+              !onOpenResearch && !onOpenHarbours && 'ml-auto',
+            )}
+            title="Harbour advisory board — which stretches of coast are unsafe today, and for whom"
+          >
+            <Anchor className="h-3 w-3" aria-hidden />
+            <span className="label">harbours</span>
+          </button>
+        )}
+
         {onOpenResearch && (
           <button
             type="button"
             onClick={onOpenResearch}
-            className="border-hairline text-ink-2 hover:text-cyan hover:border-cyan/40 ml-auto flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-2xs transition-colors"
+            className={clsx(
+              'border-hairline text-ink-2 hover:text-cyan hover:border-cyan/40 flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-2xs transition-colors',
+              !onOpenHarbours && 'ml-auto',
+            )}
             title="Datasets, subsetting and the learned models"
           >
             <BookMarked className="h-3 w-3" aria-hidden />

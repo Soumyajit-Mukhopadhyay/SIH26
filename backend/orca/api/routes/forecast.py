@@ -249,12 +249,17 @@ async def harbour_board(
     """
     from orca.services import harbourboard
 
-    rows = await harbourboard.board(state=state)
+    # An empty `?state=` is what a select with no selection sends, and it is not
+    # a request for a state called "". Treating it as one returned 404 for the
+    # default view of the page.
+    wanted = (state or "").strip() or None
+
+    rows = await harbourboard.board(state=wanted)
     if not rows:
         raise HTTPException(
             status_code=404,
             detail=(
-                f"no harbours on the register for {state!r}; "
+                f"no harbours on the register for {wanted!r}; "
                 f"see GET /harbours for the {len(harbourboard.HARBOURS)} available"
             ),
         )

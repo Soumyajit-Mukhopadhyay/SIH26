@@ -35,6 +35,7 @@ import {
   Ruler,
   Satellite,
   Waves,
+  X,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { api, ApiError } from '@/lib/api';
@@ -70,6 +71,7 @@ import { useVoiceRoster } from '@/components/VoiceBar';
 import { SeaStatePanel } from '@/components/SeaStatePanel';
 import { RoutePanel } from '@/components/RoutePanel';
 import { DistressPanel } from '@/components/DistressPanel';
+import { HarbourBoard } from '@/components/HarbourBoard';
 import { SarPanel } from '@/components/SarPanel';
 import { AlertRail } from '@/components/AlertRail';
 import { useAlerts } from '@/hooks/useAlerts';
@@ -239,6 +241,7 @@ export default function App() {
   const [treatment, setTreatment] = useState<TreatmentId>('standard');
   const [treatmentRailOpen, setTreatmentRailOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
+  const [harboursOpen, setHarboursOpen] = useState(false);
   const [lookOrigin, setLookOrigin] = useState<{ x: number; y: number } | null>(null);
   const look = TREATMENT_BY_ID[treatment];
   const lookOverlay =
@@ -1054,8 +1057,33 @@ export default function App() {
       <TreatmentFilters />
       {researchOpen && <ResearcherWorkspace onClose={() => setResearchOpen(false)} />}
 
+      {harboursOpen && (
+        <div className="bg-abyss-0 fixed inset-0 z-50 flex flex-col">
+          <div className="border-hairline glass flex shrink-0 items-center gap-3 border-b px-3 py-2">
+            <span className="label">Coastal authority view</span>
+            <span className="text-ink-3 hidden text-2xs sm:inline">
+              The same rule engine that answers one fisherman, run across the whole register.
+            </span>
+            <button
+              type="button"
+              onClick={() => setHarboursOpen(false)}
+              className="text-ink-2 hover:text-ink-0 ml-auto rounded p-1 transition-colors"
+              aria-label="Close the harbour advisory board"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-5xl px-4 py-4">
+              <HarbourBoard />
+            </div>
+          </div>
+        </div>
+      )}
+
       <FreshnessStrip
         onOpenResearch={() => setResearchOpen(true)}
+        onOpenHarbours={() => setHarboursOpen(true)}
         freshness={freshness}
         tools={
           <div

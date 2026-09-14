@@ -14,8 +14,8 @@
 
 import { chromium } from "playwright-core";
 
-const UI = "http://localhost:5181";
-const API = "http://127.0.0.1:8021";
+const UI = "http://localhost:5184";
+const API = "http://127.0.0.1:8024";
 
 const results = [];
 const log = (ok, name, detail = "") => {
@@ -224,6 +224,91 @@ if (hasResearcher) {
       .click();
     await page.waitForTimeout(1000);
   }
+}
+
+// ------------------------------------------------ harbour advisory board
+const harbourBtn = page.getByRole('button', { name: /^harbours$/i }).first();
+log((await harbourBtn.count()) > 0, 'harbours button is in the masthead');
+
+if (await harbourBtn.count()) {
+  await harbourBtn.click();
+  await page.waitForTimeout(25000);
+
+  const boardCall = apiCalls.filter((c) => c.url?.includes('/harbours/board')).at(-1);
+  log(boardCall?.status === 200, 'the harbour board builds', `HTTP ${boardCall?.status}`);
+
+  if (boardCall?.body?.rows) {
+    const b = boardCall.body;
+    const shown = await page.textContent('body');
+
+    log(
+      b.harbours_assessed >= 50,
+      'the board covers the whole coast',
+      `${b.harbours_assessed} harbours, ${b.classes.length} boat classes`,
+    );
+
+    // Coastal order is the whole point — a sortable grid would destroy it.
+    const coasts = b.rows.map((r) => r.coast);
+    const firstEast = coasts.indexOf('east');
+    log(
+      firstEast === -1 || !coasts.slice(firstEast).includes('west'),
+      'rows are in coastal order, west block then east',
+      `${coasts.filter((c) => c === 'west').length} west then ${coasts.filter((c) => c === 'east').length} east`,
+    );
+
+    // The advisory sentence must be on screen, not just the grid.
+    const trad = b.stretches['IND-TRAD'] ?? [];
+    const longest = [...trad].sort((a, b2) => b2.harbours.length - a.harbours.length)[0];
+    log(
+      longest != null && shown.includes(longest.sentence),
+      'the advisory sentence is rendered',
+      longest?.sentence,
+    );
+
+    // A stretch must never span both coasts: a swell on one side does not
+    // apply to the other, and an advisory that said so would be wrong.
+    const spanning = trad.filter((st) => {
+      const rows = b.rows.filter((r) => st.harbours.includes(r.name));
+      return new Set(rows.map((r) => r.coast)).size > 1;
+    });
+    log(spanning.length === 0, 'no stretch spans both coasts', `${trad.length} stretches checked`);
+
+    // A named harbour and its verdict must appear in the grid.
+    const sample = b.rows[0];
+    log(shown.includes(sample.name), 'harbour rows are rendered', sample.name);
+
+    // The verdicts must come from the rule engine, never a model.
+    const allVerdicts = b.rows.flatMap((r) => Object.values(r.verdicts).map((v) => v.verdict));
+    const legal = allVerdicts.every((v) =>
+      ['GO', 'CAUTION', 'NO-GO', 'UNVERIFIABLE'].includes(v),
+    );
+    log(legal, 'every cell carries a legal verdict', `${allVerdicts.length} cells`);
+
+    const unverifiable = allVerdicts.filter((v) => v === 'UNVERIFIABLE').length;
+    log(
+      unverifiable / allVerdicts.length < 0.2,
+      'the board is not mostly UNVERIFIABLE',
+      `${unverifiable}/${allVerdicts.length} cells unverifiable`,
+    );
+
+    log(
+      shown.includes('Not an official advisory') || shown.includes('legal force'),
+      'the board says it is not an official advisory',
+    );
+
+    console.log(
+      `
+  [context] ${JSON.stringify(b.counts['IND-TRAD'])} traditional, ` +
+        `${JSON.stringify(b.counts['IND-MECH-S'])} small mechanised
+`,
+    );
+  }
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(600);
+  const closeBoard = page.getByRole('button', { name: /close the harbour advisory board/i }).first();
+  if (await closeBoard.count()) await closeBoard.click();
+  await page.waitForTimeout(1200);
 }
 
 // ---------------------------------------------------------------- distress
