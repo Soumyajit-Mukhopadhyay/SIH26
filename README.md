@@ -1,6 +1,6 @@
 # ORCA
 
-**Marine EcOsystem Reasoning with Collaborative Agents** — Smart India Hackathon 2026
+**Marine Ecosystem Reasoning with Collaborative Agents** — Smart India Hackathon 2026
 
 Agentic marine decision support for the Indian EEZ: a fisherman asks a question in their own
 language, and ORCA discovers the right datasets, reasons over them with a team of specialist
