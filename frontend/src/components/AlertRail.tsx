@@ -244,14 +244,12 @@ export function AlertRail({
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {alerts.length === 0 ? (
           <p className="text-ink-3 px-1.5 py-2 text-2xs leading-snug">
-            Nothing yet. ORCA alerts on <span className="text-ink-1">transitions</span>, not on
-            state — a repeating status line is a feed, and a feed gets ignored.
+            Nothing yet. ORCA only alerts when conditions{' '}
+            <span className="text-ink-1">change</span> at a watched point, so you are not shown
+            the same status line again and again.
             {status?.watches
               ? ` Watching ${status.watches} position(s), re-checked every ${Math.round(status.poll_seconds / 60)} min.`
-              : ' Pick a point and press "watch this point" to start.'}{' '}
-            Planned: split a passage into N legs and re-check each one. When a live
-            Google-style route track is available, those legs become the watch points
-            and this box is where the crossings show up.
+              : ' Pick a point and press "watch this point" to start.'}
           </p>
         ) : (
           alerts.map((alert) => {
@@ -304,9 +302,8 @@ export function AlertRail({
 
       <div className="border-hairline border-t px-3 py-1.5">
         <p className="text-ink-3 text-2xs leading-snug">
-          Alerts stay in this console. ORCA sends no SMS, push or email — it has no authority to
-          contact anyone, and a prototype that quietly acquires a notification channel is one that
-          can spam a real fisherman.
+          Alerts stay in this console. ORCA does not send SMS, push or email, because it has no
+          authority to contact anyone directly.
         </p>
       </div>
     </div>

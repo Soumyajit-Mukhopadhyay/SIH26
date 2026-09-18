@@ -1,0 +1,42 @@
+%% ORCA / MitraAI — agentic workflow (professor slide)
+%% Open in https://mermaid.live  →  Export PNG
+
+%%{init: {
+  "theme": "dark",
+  "flowchart": { "curve": "linear", "padding": 16, "nodeSpacing": 28, "rankSpacing": 40 },
+  "themeVariables": {
+    "lineColor": "#9aa3ad",
+    "textColor": "#e8eaed",
+    "primaryTextColor": "#e8eaed",
+    "fontFamily": "ui-sans-serif, system-ui, sans-serif"
+  }
+}}%%
+
+flowchart TB
+  classDef step fill:#2b2f36,stroke:#5c6570,color:#f2f4f6,stroke-width:1px
+  classDef io fill:#1e2228,stroke:#8b939e,color:#f2f4f6,stroke-width:1px
+
+  IN(["User asks MitraAI"]):::io
+
+  N1["1. Multi-query conversion<br/>one sentence → closed intents + sub-queries"]:::step
+  N2["2. Planner<br/>map each sub-query onto the 18-tool catalogue"]:::step
+  SAFE["Safety<br/>Open-Meteo + IMD CAP / JSON → risk_engine"]:::step
+  WATCH["Watch & provenance<br/>tides · AIS · GFW · overpass · sources"]:::step
+  INTEL["Intel<br/>ERDDAP SST · PFZ rasters · PostGIS / EEZ fences"]:::step
+  N3["3. Orchestrate<br/>official → legal → geo → environment"]:::step
+  N4["4. Reporting<br/>LLM explains the cascade — never writes GO / NO-GO"]:::step
+  N5["5. Present<br/>critic-checked answer split onto two surfaces"]:::step
+
+  MAP(["Map — MapLibre + deck.gl<br/>raster PNG + JSON · ui_spec fly-to"]):::io
+  VER(["Verdict card<br/>GO · CAUTION · NO-GO · UNVERIFIABLE"]):::io
+
+  IN --> N1 --> N2
+  N2 -->|safety · alerts| SAFE
+  N2 -->|traffic · tides · sources| WATCH
+  N2 -->|fishing · boundary · route| INTEL
+  SAFE --> N3
+  WATCH --> N3
+  INTEL --> N3
+  N3 --> N4 --> N5
+  N5 -->|layers + camera| MAP
+  N5 -->|typed RiskResult| VER

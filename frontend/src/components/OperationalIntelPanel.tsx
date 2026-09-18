@@ -223,7 +223,8 @@ export function OperationalIntelPanel({ point, open, onToggle }: Props) {
               </p>
             ))}
             <p className="text-ink-3 mt-1.5 text-[10px] leading-snug">
-              Opportunity only—not proof of tasking, acquisition, or cloud-free imagery.
+              These are expected pass times only. They do not confirm that an image was taken or
+              that the sky was clear.
             </p>
           </section>
 

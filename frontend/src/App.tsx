@@ -35,7 +35,6 @@ import {
   Ruler,
   Satellite,
   Waves,
-  X,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { api, ApiError } from '@/lib/api';
@@ -1057,29 +1056,7 @@ export default function App() {
       <TreatmentFilters />
       {researchOpen && <ResearcherWorkspace onClose={() => setResearchOpen(false)} />}
 
-      {harboursOpen && (
-        <div className="bg-abyss-0 fixed inset-0 z-50 flex flex-col">
-          <div className="border-hairline glass flex shrink-0 items-center gap-3 border-b px-3 py-2">
-            <span className="label">Coastal authority view</span>
-            <span className="text-ink-3 hidden text-2xs sm:inline">
-              The same rule engine that answers one fisherman, run across the whole register.
-            </span>
-            <button
-              type="button"
-              onClick={() => setHarboursOpen(false)}
-              className="text-ink-2 hover:text-ink-0 ml-auto rounded p-1 transition-colors"
-              aria-label="Close the harbour advisory board"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <div className="mx-auto w-full max-w-5xl px-4 py-4">
-              <HarbourBoard />
-            </div>
-          </div>
-        </div>
-      )}
+      {harboursOpen && <HarbourBoard onClose={() => setHarboursOpen(false)} />}
 
       <FreshnessStrip
         onOpenResearch={() => setResearchOpen(true)}
@@ -1110,6 +1087,7 @@ export default function App() {
                       setTreatmentRailOpen(false);
                       setIntelOpen(false);
                       setSarOpen(false);
+                      setDistressOpen(false);
                       setRouteOpen(false);
                       setSeaViewOpen(false);
                     }
@@ -1129,6 +1107,7 @@ export default function App() {
                     setTreatmentRailOpen(next);
                     setIntelOpen(false);
                     setSarOpen(false);
+                    setDistressOpen(false);
                     setRouteOpen(false);
                     setSeaViewOpen(false);
                     if (next) setAlertRailOpen(false);
@@ -1148,6 +1127,7 @@ export default function App() {
                     setIntelOpen(next);
                     setTreatmentRailOpen(false);
                     setSarOpen(false);
+                    setDistressOpen(false);
                     setRouteOpen(false);
                     setSeaViewOpen(false);
                     if (next) setAlertRailOpen(false);
@@ -1167,6 +1147,7 @@ export default function App() {
                     setSarOpen(next);
                     setTreatmentRailOpen(false);
                     setIntelOpen(false);
+                    setDistressOpen(false);
                     setRouteOpen(false);
                     setSeaViewOpen(false);
                     if (next) setAlertRailOpen(false);
@@ -1210,6 +1191,7 @@ export default function App() {
                     setTreatmentRailOpen(false);
                     setIntelOpen(false);
                     setSarOpen(false);
+                    setDistressOpen(false);
                     setSeaViewOpen(false);
                     if (next) setAlertRailOpen(false);
                   },
@@ -1232,6 +1214,7 @@ export default function App() {
                     setTreatmentRailOpen(false);
                     setIntelOpen(false);
                     setSarOpen(false);
+                    setDistressOpen(false);
                     setRouteOpen(false);
                     if (next) setAlertRailOpen(false);
                   },

@@ -18,15 +18,12 @@
  * press the button.
  */
 
-import { useEffect, useMemo, useState } from 'react';
-import {
-  AlertTriangle,
-  Download,
-  FileSpreadsheet,
-  Loader2,
-  Table2,
-} from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Download, FileSpreadsheet, Table2 } from 'lucide-react';
 import { clsx } from 'clsx';
+
+import { MapAxes, RegionMap } from '@/components/research/RegionMap';
+import { Button, ColLabel, KV, Lede, Notice, Title, fmtBox } from '@/components/research/ui';
 
 /** What the JSON format of `/research/build` returns. */
 interface BuildSummary {
@@ -60,6 +57,9 @@ function isoDaysAgo(days: number): string {
   const when = new Date(Date.now() - days * 86_400_000);
   return when.toISOString().slice(0, 10);
 }
+
+const INPUT =
+  'border-hairline-strong data bg-abyss-1 text-ink-0 focus:border-cyan/60 h-8 rounded border px-2 text-xs outline-none transition-colors';
 
 export function DatasetBuilder({
   bbox,
@@ -124,7 +124,7 @@ export function DatasetBuilder({
         // which of five knobs to turn.
         const message =
           typeof detail?.detail === 'object'
-            ? `${detail.detail.message} — ${detail.detail.cells} cells against a ${detail.detail.max_cells} limit. ${(detail.detail.suggestions ?? []).join('; ')}`
+            ? `${detail.detail.message}. ${detail.detail.cells} cells against a ${detail.detail.max_cells} limit. ${(detail.detail.suggestions ?? []).join('; ')}`
             : (detail?.detail ?? `HTTP ${response.status}`);
         throw new Error(String(message));
       }
@@ -177,200 +177,266 @@ export function DatasetBuilder({
 
   const columns = rows?.length ? Object.keys(rows[0]) : [];
   const emptyColumns = summary?.empty_columns ?? {};
+  const preset = BOXES.find((p) => p.box.join() === box.join());
 
   return (
-    <div className="space-y-3">
-      {/* ---------------- variables ---------------- */}
-      <section>
-        <div className="label mb-1.5">Variables</div>
-        <div className="flex flex-wrap gap-1">
-          {available.map((name) => {
-            const on = chosen.includes(name);
-            return (
-              <button
-                key={name}
-                type="button"
-                onClick={() => toggle(name)}
-                className={clsx(
-                  'border-hairline rounded border px-2 py-0.5 text-2xs transition-colors',
-                  on ? 'border-cyan/50 bg-cyan/15 text-cyan' : 'text-ink-2 hover:text-ink-0',
-                )}
-              >
-                {name}
-              </button>
-            );
-          })}
-          {!available.length && <span className="text-ink-3 text-2xs">loading…</span>}
+    <div className="mx-auto w-full max-w-[1440px] px-6 py-6 lg:px-10 lg:py-8">
+      <Title>Build a dataset</Title>
+      <Lede>
+        Several variables over a sea area and a date range, as one table, previewed here before
+        it is downloaded, with every empty column explained.
+      </Lede>
+
+      <div className="mt-8 grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+        {/* ------------------------------------------------------ steps */}
+        <div className="divide-hairline divide-y">
+          <Step n="01" title="Variables" aside={`${chosen.length} of ${available.length || '—'} selected · up to 16`}>
+            {available.length ? (
+              <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-3 xl:grid-cols-4">
+                {available.map((name) => {
+                  const on = chosen.includes(name);
+                  return (
+                    <label
+                      key={name}
+                      className="flex h-7 cursor-pointer items-center gap-2.5 select-none"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => toggle(name)}
+                        className="accent-cyan h-3.5 w-3.5 shrink-0"
+                      />
+                      <span className={clsx('data text-xs', on ? 'text-ink-0' : 'text-ink-1')}>
+                        {name}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <span className="text-ink-2 text-xs">Loading the variable list…</span>
+            )}
+            <p className="text-ink-2 mt-3 text-xs">
+              Only variables ORCA has fetched successfully at least once are offered.
+            </p>
+          </Step>
+
+          <Step n="02" title="Region" aside={fmtBox(box)}>
+            <div className="grid gap-6 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div className="flex flex-wrap gap-1">
+                  {BOXES.map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => setBox(p.box)}
+                      className={clsx(
+                        'h-7 rounded px-2.5 text-xs transition-colors',
+                        box.join() === p.box.join()
+                          ? 'bg-abyss-2 text-ink-0'
+                          : 'text-ink-1 hover:text-ink-0',
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="data text-ink-1 mt-3 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-0.5 text-xs">
+                  <span className="text-ink-2">west</span>
+                  <span>{box[0].toFixed(2)}°</span>
+                  <span className="text-ink-2">south</span>
+                  <span>{box[1].toFixed(2)}°</span>
+                  <span className="text-ink-2">east</span>
+                  <span>{box[2].toFixed(2)}°</span>
+                  <span className="text-ink-2">north</span>
+                  <span>{box[3].toFixed(2)}°</span>
+                </div>
+                {!preset ? (
+                  <p className="text-ink-2 mt-3 text-xs">Carried over from the Discover query.</p>
+                ) : null}
+              </div>
+              <div>
+                <RegionMap box={box} className="border-hairline rounded border" />
+                <MapAxes />
+              </div>
+            </div>
+          </Step>
+
+          <Step n="03" title="Period" aside={`${start} → ${end || 'today'}`}>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <Field label="From">
+                <input
+                  type="date"
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                  className={INPUT}
+                />
+              </Field>
+              <Field label="To">
+                <input
+                  type="text"
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                  placeholder="today"
+                  className={clsx(INPUT, 'w-32')}
+                />
+              </Field>
+              <Field label="Every">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={stepDays}
+                    onChange={(e) =>
+                      setStepDays(Math.min(30, Math.max(1, Number(e.target.value) || 1)))
+                    }
+                    className={clsx(INPUT, 'w-16 text-center')}
+                  />
+                  <span className="text-ink-1 text-xs">day{stepDays === 1 ? '' : 's'}</span>
+                </div>
+              </Field>
+            </div>
+          </Step>
+
+          <Step
+            n="04"
+            title="Sampling"
+            aside={points === 1 ? 'centre of the box' : '3 × 3 lattice across the box'}
+          >
+            <div className="flex flex-wrap gap-1">
+              {[
+                { v: 1, label: 'Centre point', hint: 'one row per day' },
+                { v: 9, label: '3 × 3 lattice', hint: 'nine rows per day' },
+              ].map((opt) => (
+                <button
+                  key={opt.v}
+                  type="button"
+                  onClick={() => setPoints(opt.v)}
+                  className={clsx(
+                    'flex h-9 flex-col items-start justify-center rounded px-3 text-left transition-colors',
+                    points === opt.v ? 'bg-abyss-2 text-ink-0' : 'text-ink-1 hover:text-ink-0',
+                  )}
+                >
+                  <span className="text-xs">{opt.label}</span>
+                  <span className="text-ink-2 text-[11px]">{opt.hint}</span>
+                </button>
+              ))}
+            </div>
+          </Step>
         </div>
-        <p className="text-ink-3 mt-1 text-2xs">
-          Every variable here has been fetched successfully at least once. The list is short and
-          true rather than long and aspirational — a column of blanks reads as “measured and
-          absent”, which is worse than not offering it.
-        </p>
-      </section>
 
-      {/* ---------------- area and period ---------------- */}
-      <section className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <div className="label mb-1.5">Area</div>
-          <div className="mb-1 flex flex-wrap gap-1">
-            {BOXES.map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() => setBox(preset.box)}
-                className={clsx(
-                  'border-hairline rounded border px-2 py-0.5 text-2xs transition-colors',
-                  box.join() === preset.box.join()
-                    ? 'border-cyan/50 bg-cyan/15 text-cyan'
-                    : 'text-ink-2 hover:text-ink-0',
-                )}
+        {/* ---------------------------------------------------- request */}
+        <aside className="lg:sticky lg:top-0 lg:self-start">
+          <ColLabel>Request</ColLabel>
+          <KV
+            className="mt-2"
+            rows={[
+              {
+                k: 'Variables',
+                v: chosen.length ? (
+                  <span className="data break-words">{chosen.join(', ')}</span>
+                ) : (
+                  <span className="text-amber">none selected</span>
+                ),
+              },
+              { k: 'Region', v: <span className="data">{preset?.label ?? fmtBox(box)}</span> },
+              {
+                k: 'Period',
+                v: (
+                  <span className="data">
+                    {start} → {end || 'today'}
+                    {stepDays > 1 ? `, every ${stepDays} d` : ''}
+                  </span>
+                ),
+              },
+              { k: 'Sampling', v: points === 1 ? 'centre point' : '3 × 3 lattice' },
+              {
+                k: 'Output',
+                v: 'one row per day per point; blanks are upstream gaps, never zeroes',
+              },
+            ]}
+          />
+
+          <div className="mt-6 flex flex-col gap-2">
+            <Button kind="primary" onClick={run} busy={busy} disabled={!chosen.length} className="h-9 justify-center">
+              <Table2 className="h-3.5 w-3.5" aria-hidden />
+              Build and preview
+            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                onClick={() => download('csv')}
+                busy={downloading === 'csv'}
+                disabled={downloading !== null || !chosen.length}
+                className="justify-center"
               >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <div className="data text-ink-3 text-2xs">
-            {box.map((v) => v.toFixed(1)).join(', ')}
-          </div>
-        </div>
-
-        <div>
-          <div className="label mb-1.5">Period</div>
-          <div className="flex items-center gap-1.5">
-            <input
-              type="date"
-              value={start}
-              onChange={(event) => setStart(event.target.value)}
-              className="border-hairline data bg-abyss-1 text-ink-1 rounded border px-1.5 py-0.5 text-2xs"
-            />
-            <span className="text-ink-3 text-2xs">to</span>
-            <input
-              type="text"
-              value={end}
-              onChange={(event) => setEnd(event.target.value)}
-              placeholder="today"
-              className="border-hairline data bg-abyss-1 text-ink-1 w-24 rounded border px-1.5 py-0.5 text-2xs"
-            />
-          </div>
-          <div className="mt-1.5 flex items-center gap-3">
-            <label className="text-ink-2 flex items-center gap-1 text-2xs">
-              points
-              <select
-                value={points}
-                onChange={(event) => setPoints(Number(event.target.value))}
-                className="border-hairline bg-abyss-1 text-ink-1 rounded border px-1 py-0.5 text-2xs"
+                <Download className="h-3.5 w-3.5" aria-hidden />
+                CSV
+              </Button>
+              <Button
+                onClick={() => download('xlsx')}
+                busy={downloading === 'xlsx'}
+                disabled={downloading !== null || !chosen.length}
+                className="justify-center"
               >
-                <option value={1}>centre only</option>
-                <option value={9}>3×3 lattice</option>
-              </select>
-            </label>
-            <label className="text-ink-2 flex items-center gap-1 text-2xs">
-              every
-              <input
-                type="number"
-                min={1}
-                max={30}
-                value={stepDays}
-                onChange={(event) =>
-                  setStepDays(Math.min(30, Math.max(1, Number(event.target.value) || 1)))
-                }
-                className="border-hairline data bg-abyss-1 text-ink-1 w-12 rounded border px-1 py-0.5 text-center text-2xs"
-              />
-              day(s)
-            </label>
+                <FileSpreadsheet className="h-3.5 w-3.5" aria-hidden />
+                Excel
+              </Button>
+            </div>
           </div>
-        </div>
-      </section>
 
-      {/* ---------------- run ---------------- */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={run}
-          disabled={busy || !chosen.length}
-          className="border-cyan/40 bg-cyan/12 text-cyan hover:bg-cyan/20 flex items-center gap-1.5 rounded border px-3 py-1 text-2xs transition-colors disabled:opacity-40"
-        >
-          {busy ? (
-            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-          ) : (
-            <Table2 className="h-3 w-3" aria-hidden />
-          )}
-          {busy ? 'building…' : 'build and preview'}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => download('xlsx')}
-          disabled={downloading !== null || !chosen.length}
-          className="border-hairline text-ink-1 hover:text-ink-0 flex items-center gap-1.5 rounded border px-3 py-1 text-2xs transition-colors disabled:opacity-40"
-        >
-          {downloading === 'xlsx' ? (
-            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-          ) : (
-            <FileSpreadsheet className="h-3 w-3" aria-hidden />
-          )}
-          Excel
-        </button>
-
-        <button
-          type="button"
-          onClick={() => download('csv')}
-          disabled={downloading !== null || !chosen.length}
-          className="border-hairline text-ink-1 hover:text-ink-0 flex items-center gap-1.5 rounded border px-3 py-1 text-2xs transition-colors disabled:opacity-40"
-        >
-          {downloading === 'csv' ? (
-            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-          ) : (
-            <Download className="h-3 w-3" aria-hidden />
-          )}
-          CSV
-        </button>
+          {error ? (
+            <Notice tone="amber" className="mt-5">
+              {error}
+            </Notice>
+          ) : null}
+        </aside>
       </div>
 
-      {error ? (
-        <p className="text-amber border-hairline bg-abyss-1 rounded border px-2.5 py-1.5 text-2xs">
-          {error}
-        </p>
-      ) : null}
-
-      {/* ---------------- what came back ---------------- */}
+      {/* ----------------------------------------------------------- result */}
       {summary ? (
-        <section className="space-y-2">
-          <div className="text-ink-2 text-2xs">
-            <span className="data text-ink-0">{summary.rows}</span> rows ×{' '}
-            <span className="data text-ink-0">{summary.variables.length}</span> variables ·{' '}
-            {summary.missing_values} blank cell(s) — blanks are upstream gaps, not zeroes.
+        <section className="border-hairline-strong mt-12 border-t pt-6">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <h3 className="text-ink-0 text-[13px] font-semibold">Preview</h3>
+            <span className="text-ink-1 text-xs">
+              <span className="data text-ink-0">{summary.rows}</span> rows ×{' '}
+              <span className="data text-ink-0">{summary.variables.length}</span> variables ·{' '}
+              <span className="data text-ink-0">{summary.missing_values}</span> blank cells
+            </span>
+            {rows && rows.length > 200 ? (
+              <span className="text-ink-2 text-xs">
+                first 200 shown; the download has all {rows.length}
+              </span>
+            ) : null}
           </div>
 
-          {/* Empty columns ABOVE the table. A researcher who finds this after
-              downloading has spent a round trip learning what we already knew. */}
-          {Object.entries(emptyColumns).map(([name, why]) => (
-            <p key={name} className="text-amber flex items-start gap-1.5 text-2xs leading-relaxed">
-              <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden />
-              <span>
-                <span className="data">{name}</span> is empty — {why}
-              </span>
-            </p>
-          ))}
-
-          {summary.unavailable_variables.length > 0 ? (
-            <p className="text-amber text-2xs">
-              Not served at all: {summary.unavailable_variables.join(', ')}
-            </p>
+          {Object.keys(emptyColumns).length || summary.unavailable_variables.length ? (
+            <div className="mt-4 space-y-2">
+              {Object.entries(emptyColumns).map(([name, why]) => (
+                <Notice key={name} tone="amber">
+                  <span className="data">{name}</span> is empty: {why}
+                </Notice>
+              ))}
+              {summary.unavailable_variables.length ? (
+                <Notice tone="amber">
+                  Not served at all:{' '}
+                  <span className="data">{summary.unavailable_variables.join(', ')}</span>
+                </Notice>
+              ) : null}
+            </div>
           ) : null}
 
           {rows?.length ? (
-            <div className="border-hairline max-h-72 overflow-auto rounded border">
-              <table className="w-full text-2xs">
-                <thead className="bg-abyss-1 sticky top-0">
+            <div className="border-hairline mt-4 max-h-[480px] overflow-auto rounded border">
+              <table className="w-full text-xs">
+                <thead className="bg-abyss-1 sticky top-0 z-10">
                   <tr>
                     {columns.map((name) => (
                       <th
                         key={name}
                         className={clsx(
-                          'border-hairline border-b px-2 py-1 text-left font-medium',
-                          name in emptyColumns ? 'text-amber' : 'text-ink-1',
+                          'data border-hairline-strong border-b px-3 py-2 text-left font-medium whitespace-nowrap',
+                          name in emptyColumns ? 'text-amber' : 'text-ink-0',
                         )}
                       >
                         {name}
@@ -380,9 +446,12 @@ export function DatasetBuilder({
                 </thead>
                 <tbody>
                   {rows.slice(0, 200).map((row, index) => (
-                    <tr key={index} className="border-hairline border-b last:border-0">
+                    <tr key={index} className="border-hairline hover:bg-abyss-1 border-b last:border-0">
                       {columns.map((name) => (
-                        <td key={name} className="data text-ink-2 px-2 py-0.5 whitespace-nowrap">
+                        <td
+                          key={name}
+                          className="data text-ink-1 px-3 py-1 whitespace-nowrap tabular-nums"
+                        >
                           {row[name] === null || row[name] === undefined ? (
                             <span className="text-ink-3">—</span>
                           ) : (
@@ -397,33 +466,79 @@ export function DatasetBuilder({
             </div>
           ) : null}
 
-          {rows && rows.length > 200 ? (
-            <p className="text-ink-3 text-2xs">
-              Showing the first 200 of {rows.length} rows. The download has all of them.
-            </p>
-          ) : null}
-
           {/* Provenance, per source, naming the columns it produced. Merging two
               ORCA files means knowing that wind_speed is ERA5 reanalysis and sst
               is a satellite analysis. */}
-          <div className="space-y-1.5">
-            {summary.datasets.map((source) => (
-              <div key={source.endpoint} className="border-hairline rounded border px-2.5 py-1.5">
-                <div className="text-ink-1 text-2xs">
-                  {source.title}
-                  {source.columns?.length ? (
-                    <span className="text-ink-3"> — {source.columns.join(', ')}</span>
-                  ) : null}
-                </div>
-                <div className="text-ink-3 text-2xs">
-                  {source.provider} · {source.licence}
-                </div>
-                <div className="text-ink-3 mt-0.5 text-2xs leading-relaxed">{source.caveats}</div>
-              </div>
-            ))}
+          <div className="mt-8">
+            <ColLabel>Sources in this file</ColLabel>
+            <table className="mt-2 w-full text-xs">
+              <thead>
+                <tr className="border-hairline-strong border-b">
+                  <th className="label py-1.5 pr-4 text-left font-medium">Dataset</th>
+                  <th className="label py-1.5 pr-4 text-left font-medium">Columns</th>
+                  <th className="label hidden py-1.5 pr-4 text-left font-medium md:table-cell">
+                    Provider
+                  </th>
+                  <th className="label hidden py-1.5 text-left font-medium lg:table-cell">
+                    Licence
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.datasets.map((source) => (
+                  <tr key={source.endpoint} className="border-hairline border-b align-top">
+                    <td className="py-2.5 pr-4">
+                      <div className="text-ink-0">{source.title}</div>
+                      <div className="text-ink-2 mt-0.5 max-w-xl leading-relaxed">
+                        {source.caveats}
+                      </div>
+                    </td>
+                    <td className="data text-ink-1 py-2.5 pr-4">
+                      {source.columns?.length ? source.columns.join(', ') : '—'}
+                    </td>
+                    <td className="text-ink-1 hidden py-2.5 pr-4 md:table-cell">{source.provider}</td>
+                    <td className="text-ink-1 hidden py-2.5 lg:table-cell">{source.licence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
     </div>
+  );
+}
+
+function Step({
+  n,
+  title,
+  aside,
+  children,
+}: {
+  n: string;
+  title: string;
+  aside?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="grid gap-x-8 gap-y-3 py-6 first:pt-0 md:grid-cols-[140px_minmax(0,1fr)]">
+      <div>
+        <div className="flex items-baseline gap-2">
+          <span className="data text-ink-2 text-[11px]">{n}</span>
+          <h3 className="text-ink-0 text-[13px] font-semibold">{title}</h3>
+        </div>
+        {aside ? <div className="data text-ink-2 mt-1 text-[11px] leading-snug">{aside}</div> : null}
+      </div>
+      <div className="min-w-0">{children}</div>
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex items-center gap-2.5">
+      <span className="label">{label}</span>
+      {children}
+    </label>
   );
 }

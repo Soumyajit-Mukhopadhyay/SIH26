@@ -26,6 +26,7 @@ import {
   Route as RouteIcon,
   Ruler,
   ShieldAlert,
+  X,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { ApiError, api } from '@/lib/api';
@@ -125,43 +126,48 @@ export function RoutePanel({
   const refused = plan?.refused_on_direct_line ?? [];
 
   return (
-    <div className="glass pointer-events-auto flex flex-col gap-2 rounded-lg px-3 py-2.5">
+    <div className="glass pointer-events-auto flex flex-col gap-2.5 rounded-lg px-3 py-2.5">
       <div className="flex items-center gap-1.5">
         <RouteIcon className="text-cyan h-3.5 w-3.5" aria-hidden />
         <span className="label">Safe passage</span>
         {plan?.lattice && (
-          <span className={clsx('data text-ink-3 text-2xs', !onClose && 'ml-auto')}>
-            {plan.lattice.step_deg}° lattice
-          </span>
+          <span className="data text-ink-3 text-2xs ml-1">{plan.lattice.step_deg}° lattice</span>
         )}
         {onClose && (
           <button
             type="button"
             onClick={onClose}
-            className="text-ink-3 hover:text-ink-1 ml-auto text-2xs transition-colors"
+            aria-label="Close safe passage"
+            title="Close"
+            className="text-ink-3 hover:text-ink-0 hover:bg-abyss-2 -mr-1 ml-auto rounded p-1 transition-colors"
           >
-            close
+            <X className="h-3.5 w-3.5" aria-hidden />
           </button>
         )}
       </div>
 
-      <div className="space-y-1">
-        <div className="flex items-center gap-1.5 text-2xs">
-          <span className="text-ink-3 w-8 shrink-0 uppercase">from</span>
-          <span className="data text-ink-1 min-w-0 flex-1 truncate">
+      <div className="border-hairline divide-hairline divide-y rounded border">
+        <div className="flex items-center gap-2 px-2 py-1.5 text-2xs">
+          <span className="text-ink-3 w-9 shrink-0 tracking-wide uppercase">from</span>
+          <span
+            className={clsx(
+              'min-w-0 flex-1 truncate',
+              origin ? 'data text-ink-0' : 'text-ink-3',
+            )}
+          >
             {origin
               ? (origin.label ?? `${origin.lat.toFixed(3)}°N ${origin.lon.toFixed(3)}°E`)
-              : 'pick a point on the map'}
+              : 'Pick a point on the map'}
           </span>
         </div>
-        <div className="flex items-center gap-1.5 text-2xs">
-          <span className="text-ink-3 w-8 shrink-0 uppercase">to</span>
+        <div className="flex items-center gap-2 px-2 py-1.5 text-2xs">
+          <span className="text-ink-3 w-9 shrink-0 tracking-wide uppercase">to</span>
           {destination ? (
-            <span className="data text-ink-1 min-w-0 flex-1 truncate">
+            <span className="data text-ink-0 min-w-0 flex-1 truncate">
               {destination.lat.toFixed(3)}°N {destination.lon.toFixed(3)}°E
             </span>
           ) : (
-            <span className="text-ink-3 min-w-0 flex-1">not set</span>
+            <span className="text-ink-3 min-w-0 flex-1">Not set</span>
           )}
           <button
             type="button"
@@ -171,11 +177,11 @@ export function RoutePanel({
               'flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 transition-colors',
               pickingDestination
                 ? 'border-cyan/60 bg-cyan/20 text-cyan'
-                : 'border-hairline text-ink-2 hover:text-ink-0',
+                : 'border-hairline text-ink-2 hover:border-hairline-strong hover:text-ink-0',
             )}
           >
             <Crosshair className="h-2.5 w-2.5" aria-hidden />
-            {pickingDestination ? 'click the sea' : 'set'}
+            {pickingDestination ? 'Click the sea' : destination ? 'Change' : 'Set'}
           </button>
         </div>
       </div>
@@ -184,20 +190,25 @@ export function RoutePanel({
         type="button"
         onClick={run}
         disabled={!origin || !destination || busy}
-        className="border-cyan/40 bg-cyan/15 text-cyan hover:bg-cyan/25 flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-2xs transition-colors disabled:opacity-30"
+        className="border-cyan/50 bg-cyan/15 text-cyan hover:bg-cyan/25 flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30"
       >
         {busy ? (
           <>
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-            sampling the corridor…
+            Sampling the corridor
           </>
         ) : (
           <>
             <Navigation className="h-3 w-3" aria-hidden />
-            plan the passage
+            Plan the passage
           </>
         )}
       </button>
+      {!destination && !busy && (
+        <p className="text-ink-3 -mt-1 text-center text-[10px]">
+          Set a destination to enable planning
+        </p>
+      )}
 
       {error && (
         <p className="text-red flex items-start gap-1 text-2xs leading-snug">

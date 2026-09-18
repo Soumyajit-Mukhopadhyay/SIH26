@@ -416,7 +416,7 @@ export function ChatPanel({
               className="text-ink-0 flex items-center gap-1.5 text-sm"
               style={{ animation: 'orca-rise 420ms var(--ease-out-instrument)' }}
             >
-              Welcome back, sir
+              Welcome back
               <span
                 className="inline-block text-base leading-none"
                 style={{
