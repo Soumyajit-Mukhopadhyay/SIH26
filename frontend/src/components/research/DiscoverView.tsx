@@ -179,8 +179,10 @@ export function DiscoverView({
               {result.intent.assumptions.length ? (
                 <ul className="mt-2.5 space-y-1">
                   {result.intent.assumptions.map((a) => (
-                    <li key={a} className="text-amber flex items-start gap-2 text-xs leading-snug">
-                      <span className="bg-amber mt-[6px] h-1 w-1 shrink-0 rounded-full" aria-hidden />
+                    <li key={a} className="text-ink-2 flex items-start gap-2 text-xs leading-snug">
+                      <span className="text-ink-3 shrink-0 select-none" aria-hidden>
+                        Assumed
+                      </span>
                       {a}
                     </li>
                   ))}
