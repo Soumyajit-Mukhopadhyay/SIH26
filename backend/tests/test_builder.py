@@ -63,14 +63,21 @@ class TestAdvertisedCapability:
             assert key in DATASETS, f"{variable} maps to a non-existent registry key {key!r}"
             assert variable in set(DATASETS[key].variables.values())
 
+    def test_no_physical_quantity_is_offered_twice(self) -> None:
+        """ "sst" and "sea_surface_temperature" side by side read as a duplicate
+        to a researcher picking columns, because they are one quantity."""
+        offered = builder.known_variables()
+        assert "sst" in offered
+        assert "sea_surface_temperature" not in offered
+
     def test_a_range_variable_is_never_also_routed_through_griddap(self) -> None:
         """The two paths must not both claim a variable.
 
         If they did, the per-day path would issue one request per day for data
         the range path already has — and the two answers would differ, because
-        they are different products. `sea_surface_temperature` (Open-Meteo's
-        model field) and `sst` (NASA MUR satellite analysis) are deliberately
-        separate names for exactly this reason."""
+        they are different products. That is also why only ONE sea-surface
+        temperature is offered: Open-Meteo's model SST was removed rather than
+        kept under a second name beside NASA MUR's `sst`."""
         from orca.research.variables import BY_NAME as REGISTRY
 
         for name, entry in REGISTRY.items():

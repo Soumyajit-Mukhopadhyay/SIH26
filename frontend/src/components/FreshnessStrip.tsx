@@ -95,14 +95,15 @@ export function FreshnessStrip({
           <button
             type="button"
             onClick={onOpenHarbours}
-            className={clsx(
-              'border-hairline text-ink-2 hover:text-cyan hover:border-cyan/40 flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-2xs transition-colors',
-              !onOpenResearch && !onOpenHarbours && 'ml-auto',
-            )}
+            // Filled pills in their own accent colour, not hairline ghosts: these
+            // open whole audiences (coastal authorities, researchers), and at
+            // the old muted 2xs size a first-time viewer read them as chrome
+            // and never found the features behind them.
+            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-md border border-amber-400/60 bg-amber-400/15 px-3 py-1 text-xs font-semibold tracking-wide text-amber-200 uppercase shadow-[0_0_12px_rgba(251,191,36,0.25)] transition-colors hover:border-amber-300 hover:bg-amber-400/25 hover:text-amber-100"
             title="Harbour advisory board — which stretches of coast are unsafe today, and for whom"
           >
-            <Anchor className="h-3 w-3" aria-hidden />
-            <span className="label">harbours</span>
+            <Anchor className="h-3.5 w-3.5" aria-hidden />
+            <span>Harbours</span>
           </button>
         )}
 
@@ -111,13 +112,13 @@ export function FreshnessStrip({
             type="button"
             onClick={onOpenResearch}
             className={clsx(
-              'border-hairline text-ink-2 hover:text-cyan hover:border-cyan/40 flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-2xs transition-colors',
+              'border-cyan/60 bg-cyan/15 text-cyan hover:bg-cyan/25 flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1 text-xs font-semibold tracking-wide uppercase shadow-[0_0_12px_rgba(34,211,238,0.25)] transition-colors',
               !onOpenHarbours && 'ml-auto',
             )}
             title="Datasets, subsetting and the learned models"
           >
-            <BookMarked className="h-3 w-3" aria-hidden />
-            <span className="label">researcher</span>
+            <BookMarked className="h-3.5 w-3.5" aria-hidden />
+            <span>Researcher</span>
           </button>
         )}
 
@@ -125,14 +126,14 @@ export function FreshnessStrip({
           type="button"
           onClick={() => setOpen((v) => !v)}
           className={clsx(
-            'text-ink-2 hover:text-ink-0 flex shrink-0 items-center gap-1 text-2xs transition-colors',
-            !onOpenResearch && 'ml-auto',
+            'flex shrink-0 items-center gap-1.5 rounded-md border border-violet-400/60 bg-violet-400/15 px-3 py-1 text-xs font-semibold tracking-wide text-violet-200 uppercase shadow-[0_0_12px_rgba(167,139,250,0.25)] transition-colors hover:border-violet-300 hover:bg-violet-400/25',
+            !onOpenResearch && !onOpenHarbours && 'ml-auto',
           )}
           aria-expanded={open}
         >
-          <span className="label">provenance ledger</span>
+          <span>Provenance ledger</span>
           <ChevronDown
-            className={clsx('h-3 w-3 transition-transform', open && 'rotate-180')}
+            className={clsx('h-3.5 w-3.5 transition-transform', open && 'rotate-180')}
             aria-hidden
           />
         </button>
