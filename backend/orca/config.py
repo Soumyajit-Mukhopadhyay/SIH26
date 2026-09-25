@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     imd_api_key: SecretStr | None = None
     data_gov_in_api_key: SecretStr | None = None
     worldtides_api_key: SecretStr | None = None
+    open_meteo_api_key: SecretStr | None = None
 
     # --------------------------------------------------------------- vessels
     aisstream_api_key: SecretStr | None = None
@@ -147,6 +148,7 @@ class Settings(BaseSettings):
         "imd_api_key",
         "data_gov_in_api_key",
         "worldtides_api_key",
+        "open_meteo_api_key",
         "aisstream_api_key",
         "gfw_api_token",
         "cesium_ion_token",

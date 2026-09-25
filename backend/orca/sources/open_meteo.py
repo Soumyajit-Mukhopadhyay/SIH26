@@ -153,6 +153,17 @@ class _OpenMeteoBase(Source):
     #: sea cell or a coastal query silently returns land.
     cell_selection: ClassVar[str] = "land"
 
+    async def fetch(self, url: str, **kwargs: Any) -> Fetched:
+        from orca.config import get_settings
+        settings = get_settings()
+        if settings.open_meteo_api_key:
+            url = url.replace("marine-api.open-meteo.com", "customer-api.open-meteo.com")
+            url = url.replace("api.open-meteo.com", "customer-api.open-meteo.com")
+            params = dict(kwargs.get("params") or {})
+            params["apikey"] = settings.open_meteo_api_key.get_secret_value()
+            kwargs["params"] = params
+        return await super().fetch(url, **kwargs)
+
     async def series(
         self,
         lat: float,
