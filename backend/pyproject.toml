@@ -2,6 +2,7 @@
 name = "orca"
 version = "0.1.0"
 description = "ORCA — Marine EcOsystem Reasoning with Collaborative Agents (SIH 2026)"
+
 requires-python = ">=3.11,<3.15"
 dependencies = [
   # --- web / api ---
@@ -47,7 +48,7 @@ dependencies = [
 postgis = ["asyncpg>=0.30"]
 observability = ["langfuse>=2.53"]
 heavy-ingest = ["earthaccess>=0.12", "rasterio>=1.4", "rioxarray>=0.18"]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.22", "ruff>=0.8", "anyio>=4.6"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "respx>=0.22", "ruff>=0.8", "anyio>=4.6", "openpyxl>=3.0"]
 
 [build-system]
 requires = ["hatchling"]
