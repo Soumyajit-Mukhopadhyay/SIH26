@@ -236,7 +236,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def _streaming_and_provenance_headers(request: Request, call_next: Any) -> Any:
         response = await call_next(request)
-        if request.url.path.startswith(STREAMING_PATH_PREFIXES):
+        if any(request.url.path.endswith(p) or request.url.path.endswith(p + "/") for p in STREAMING_PATH_PREFIXES):
             # nginx and most PaaS proxies buffer by default, which would batch an
             # SSE trace into a single frame at the end and destroy the one thing
             # the trace panel exists to show.
