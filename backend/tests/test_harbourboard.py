@@ -179,3 +179,109 @@ class TestTheBoardIsJustTheRuleEngine:
     def test_worst_picks_the_most_severe_class(self) -> None:
         entry = row("A", "west", {"IND-TRAD": "NO-GO", "IND-DEEPSEA": "GO"})
         assert entry.worst == "NO-GO"
+
+
+class TestTheBoardIsCached:
+    """One board is 60 Open-Meteo calls against a 600-per-minute per-IP limit.
+
+    Ten viewers in a minute would spend the entire allowance on one screen and
+    starve the point verdicts and the router that share the IP. That is the
+    429 storm that made the first hosted deployment unusable, so the caching
+    here is a quota decision rather than a speed one.
+    """
+
+    def setup_method(self) -> None:
+        harbourboard.clear_cache()
+
+    def test_a_second_call_does_not_hit_the_network(self) -> None:
+        """The whole point: the second viewer costs nothing."""
+        import asyncio
+
+        calls = {"n": 0}
+
+        async def fake_sample(lats, lons, **kwargs):
+            calls["n"] += 1
+            return [
+                {
+                    "wave_height": 1.0,
+                    "wind_speed": 10.0,
+                    "visibility": 12000.0,
+                    "convective_energy": 100.0,
+                }
+                for _ in lats
+            ]
+
+        import orca.sources.open_meteo as om
+
+        original = om.sample_conditions
+        om.sample_conditions = fake_sample
+        try:
+            first = asyncio.run(harbourboard.board())
+            second = asyncio.run(harbourboard.board())
+        finally:
+            om.sample_conditions = original
+
+        assert calls["n"] == 1, "the second board should have been served from cache"
+        assert second is first
+
+    def test_fresh_forces_a_recompute(self) -> None:
+        """The refresh button must actually refresh, or it is a lie."""
+        import asyncio
+
+        calls = {"n": 0}
+
+        async def fake_sample(lats, lons, **kwargs):
+            calls["n"] += 1
+            return [
+                {
+                    "wave_height": 1.0,
+                    "wind_speed": 10.0,
+                    "visibility": 12000.0,
+                    "convective_energy": 100.0,
+                }
+                for _ in lats
+            ]
+
+        import orca.sources.open_meteo as om
+
+        original = om.sample_conditions
+        om.sample_conditions = fake_sample
+        try:
+            asyncio.run(harbourboard.board())
+            asyncio.run(harbourboard.board(fresh=True))
+        finally:
+            om.sample_conditions = original
+
+        assert calls["n"] == 2
+
+    def test_a_state_board_is_not_served_from_the_whole_coast_entry(self) -> None:
+        """A Kerala board and a national board are different answers. Serving
+        one from the other's entry would show an officer the wrong coast."""
+        assert harbourboard._cache_key("Kerala", None) != harbourboard._cache_key(None, None)
+
+    def test_an_empty_result_is_not_cached(self) -> None:
+        """An empty board usually means the upstream was briefly down. Holding
+        that for ten minutes would turn a blip into an outage."""
+        import asyncio
+
+        async def fake_sample(lats, lons, **kwargs):
+            return [{"wave_height": None} for _ in lats]
+
+        import orca.sources.open_meteo as om
+
+        original = om.sample_conditions
+        om.sample_conditions = fake_sample
+        try:
+            asyncio.run(harbourboard.board(state="Nowhere"))
+        finally:
+            om.sample_conditions = original
+
+        assert harbourboard.cache_age_s("Nowhere") is None
+
+    def test_the_response_says_how_old_the_board_is(self) -> None:
+        """A cached verdict that does not say it is cached is the kind of thing
+        an officer only discovers when it is wrong."""
+        described = harbourboard.describe([], age_s=42.0)
+        assert described["cache"]["age_s"] == 42.0
+        assert described["cache"]["hit"] is True
+        assert described["cache"]["ttl_s"] == harbourboard.BOARD_TTL_S
