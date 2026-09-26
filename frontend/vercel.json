@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://sih26-4sno.onrender.com/:path*"
+      "destination": "https://orca-sih.duckdns.org/:path*"
     },
     {
       "source": "/(.*)",

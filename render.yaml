@@ -8,6 +8,6 @@
       - key: PYTHON_VERSION
         value: 3.12.3
       - key: ORCA_ENV
-        value: production
+        value: prod
       - key: ORCA_DB_DRIVER
         value: sqlite
