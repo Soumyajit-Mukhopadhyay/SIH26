@@ -39,11 +39,13 @@ def calculate_metrics():
     precision = TP / (TP + FP)
     recall = TP / (TP + FN)
     f1_score = 2 * (precision * recall) / (precision + recall)
+    iou_score = TP / (TP + FP + FN)
     accuracy = (TP + TN) / (TP + FP + FN + TN)
     
     print(f"    -> Precision: {precision:.3f}")
     print(f"    -> Recall:    {recall:.3f}")
     print(f"    -> F1-Score:  {f1_score:.3f}")
+    print(f"    -> IoU Score: {iou_score:.3f} (Intersection over Union)")
     print(f"    -> Accuracy:  {accuracy:.3f} (Misleading due to class imbalance)\n")
 
     print("==============================================")
