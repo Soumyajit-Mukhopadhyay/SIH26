@@ -234,6 +234,13 @@ async def datasets() -> dict[str, object]:
 @router.get("/harbours/board", summary="Verdict at every fishing harbour, by boat class")
 async def harbour_board(
     state: str | None = Query(default=None, description="Restrict to one maritime state or UT."),
+    fresh: bool = Query(
+        default=False,
+        description=(
+            "Recompute instead of serving the cached board. One board costs 60 upstream "
+            "calls against a 600-per-minute limit, so this is deliberate rather than default."
+        ),
+    ),
 ) -> dict[str, Any]:
     """Which stretches of coast are unsafe today, and for whom.
 
@@ -254,7 +261,7 @@ async def harbour_board(
     # default view of the page.
     wanted = (state or "").strip() or None
 
-    rows = await harbourboard.board(state=wanted)
+    rows = await harbourboard.board(state=wanted, fresh=fresh)
     if not rows:
         raise HTTPException(
             status_code=404,
@@ -263,7 +270,7 @@ async def harbour_board(
                 f"see GET /harbours for the {len(harbourboard.HARBOURS)} available"
             ),
         )
-    return harbourboard.describe(rows)
+    return harbourboard.describe(rows, age_s=harbourboard.cache_age_s(wanted))
 
 
 @router.get("/harbours", summary="The fishing-harbour register")

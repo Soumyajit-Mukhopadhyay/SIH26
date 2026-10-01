@@ -31,6 +31,29 @@ kilometres apart. Harbours are therefore ordered **along the shore**: down the
 west coast from Kutch to Kanyakumari, then up the east coast to the Sundarbans —
 the order a boat would pass them, and the order an advisory reads in.
 
+## The board is cached, but not for the reason you would guess
+
+It is **not** protecting the Open-Meteo quota. `sample_conditions` already
+keeps a 20-minute per-point cache, so a second viewer within that window was
+always costing zero upstream calls. This cache sits above that and buys three
+smaller things:
+
+- **Work, not quota.** A board runs the rule engine 300 times (60 harbours x 5
+  classes). On a 1 GB instance that is worth not repeating for every viewer.
+- **An honest timestamp.** The response carries `cache.age_s`, so a coastal
+  officer can see whether a verdict was computed now or nine minutes ago
+  rather than assuming it is live.
+- **A refresh button that refreshes.** `?fresh=true` bypasses this cache AND
+  the sampler's, which is the only way to actually get new numbers inside the
+  20-minute window.
+
+Ten minutes is not arbitrary: the models behind these fields publish hourly,
+so a ten-minute-old board is the same board.
+
+The cache is per-process and in memory. One machine serves this, so that is
+enough; if ORCA ever runs more than one worker they will each keep their own,
+which costs a little repeated work but cannot serve anything stale or wrong.
+
 ## Two requests, not a hundred and twenty
 
 Conditions come from `sample_conditions`, which batches many points into one
@@ -50,6 +73,7 @@ is not an offshore forecast.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -61,6 +85,37 @@ from orca.services.thresholds import BOAT_CLASSES
 log = logging.getLogger(__name__)
 
 BOARD_VERSION = "orca-harbour-board-2026.09"
+
+#: How long a computed board stays good for, in seconds.
+#:
+#: The wave, wind and visibility models behind it publish hourly, so anything
+#: under an hour returns the same numbers. Ten minutes is short enough that the
+#: reported `cache.age_s` never surprises anyone, and long enough to spare the
+#: 300 rule-engine evaluations a board costs.
+BOARD_TTL_S = 600.0
+
+#: (state, classes) -> (monotonic time computed, rows). Deliberately keyed on
+#: the query too: a Kerala-only board is a different, cheaper request than the
+#: whole coast, and serving one from the other's entry would be wrong.
+_CACHE: dict[tuple[str | None, tuple[str, ...] | None], tuple[float, list[HarbourVerdicts]]] = {}
+
+
+def _cache_key(
+    state: str | None, classes: list[str] | None
+) -> tuple[str | None, tuple[str, ...] | None]:
+    return (state.lower() if state else None, tuple(sorted(classes)) if classes else None)
+
+
+def cache_age_s(state: str | None = None, classes: list[str] | None = None) -> float | None:
+    """Seconds since this board was computed, or None if it is not cached."""
+    hit = _CACHE.get(_cache_key(state, classes))
+    return None if hit is None else time.monotonic() - hit[0]
+
+
+def clear_cache() -> None:
+    """Drop every cached board. Used by tests, and safe at runtime."""
+    _CACHE.clear()
+
 
 #: Verdicts in descending severity, so a "worst first" sort is a lookup.
 _SEVERITY = {"NO-GO": 0, "UNVERIFIABLE": 1, "CAUTION": 2, "GO": 3}
@@ -106,9 +161,23 @@ async def board(
     *,
     state: str | None = None,
     classes: list[str] | None = None,
+    fresh: bool = False,
 ) -> list[HarbourVerdicts]:
-    """Run the rule engine at every harbour, for every class, in coastal order."""
+    """Run the rule engine at every harbour, for every class, in coastal order.
+
+    Served from :data:`_CACHE` when a board for the same query was computed
+    less than :data:`BOARD_TTL_S` ago. Pass ``fresh=True`` to recompute — that
+    is what the refresh button does, and it is the only way to spend the 60
+    upstream calls deliberately.
+    """
     from orca.sources.open_meteo import sample_conditions
+
+    key = _cache_key(state, classes)
+    if not fresh:
+        hit = _CACHE.get(key)
+        if hit is not None and time.monotonic() - hit[0] < BOARD_TTL_S:
+            log.debug("harbour board served from cache (%s)", key)
+            return hit[1]
 
     selected = [h for h in HARBOURS if state is None or h.state.lower() == state.lower()]
     if not selected:
@@ -116,9 +185,13 @@ async def board(
 
     wanted = [b for b in BOAT_CLASSES if classes is None or b.code in classes]
 
+    # `fresh` has to reach the sampler too. It keeps its own 20-minute per-point
+    # cache, so bypassing only the board cache would recompute the verdicts from
+    # the very same numbers and the refresh button would be decorative.
     samples = await sample_conditions(
         [h.lat for h in selected],
         [h.lon for h in selected],
+        use_cache=not fresh,
     )
 
     out: list[HarbourVerdicts] = []
@@ -149,6 +222,12 @@ async def board(
                 verdicts=verdicts,
             )
         )
+
+    # Cached only on success. An empty result is not worth holding for ten
+    # minutes -- it usually means the upstream was briefly down, and caching it
+    # would turn a blip into a ten-minute outage.
+    if out:
+        _CACHE[key] = (time.monotonic(), out)
     return out
 
 
@@ -196,8 +275,14 @@ def stretches(rows: list[HarbourVerdicts], boat_class: str) -> list[dict[str, An
     return runs
 
 
-def describe(rows: list[HarbourVerdicts]) -> dict[str, Any]:
-    """The board, shaped for an API response and for a table."""
+def describe(rows: list[HarbourVerdicts], *, age_s: float | None = None) -> dict[str, Any]:
+    """The board, shaped for an API response and for a table.
+
+    ``age_s`` is how old the underlying computation is. It is reported rather
+    than hidden: a board is cached for up to ten minutes, and a coastal officer
+    reading a verdict deserves to know whether it was computed now or nine
+    minutes ago.
+    """
     classes = [
         {"code": b.code, "label": b.label, "max_wave_m": b.max_wave_m, "max_wind_kn": b.max_wind_kn}
         for b in BOAT_CLASSES
@@ -219,6 +304,17 @@ def describe(rows: list[HarbourVerdicts]) -> dict[str, Any]:
     return {
         "board_version": BOARD_VERSION,
         "generated_at": utcnow().isoformat(),
+        "cache": {
+            "age_s": None if age_s is None else round(age_s, 1),
+            "ttl_s": BOARD_TTL_S,
+            "hit": age_s is not None and age_s > 1.0,
+            "note": (
+                f"Boards are computed at most once every {BOARD_TTL_S / 60:.0f} minutes. The "
+                "models behind them publish hourly, so a cached board is the same board. Add "
+                "?fresh=true to recompute, which also bypasses the sampler's own 20-minute "
+                "per-point cache."
+            ),
+        },
         "harbours_assessed": len(on_water),
         "classes": classes,
         "rows": [

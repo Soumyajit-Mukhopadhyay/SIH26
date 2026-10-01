@@ -144,11 +144,18 @@ export function HarbourBoard({ onClose }: { onClose: () => void }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
 
-  const load = async (forState: string) => {
+  // `fresh` is what the refresh button sends, and only the refresh button.
+  // A board costs 60 Open-Meteo calls against a 600-per-minute limit shared
+  // with every point verdict and route on this deployment, so recomputing is
+  // something the reader asks for rather than something opening a page does.
+  const load = async (forState: string, fresh = false) => {
     setBusy(true);
     setError(null);
     try {
-      const query = forState ? `?state=${encodeURIComponent(forState)}` : '';
+      const params = new URLSearchParams();
+      if (forState) params.set('state', forState);
+      if (fresh) params.set('fresh', 'true');
+      const query = params.toString() ? `?${params}` : '';
       const response = await fetch(`/api/harbours/board${query}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setBoard((await response.json()) as Board);
@@ -236,7 +243,7 @@ export function HarbourBoard({ onClose }: { onClose: () => void }) {
               <p className="text-red text-xs">{error}</p>
               <button
                 type="button"
-                onClick={() => void load(state)}
+                onClick={() => void load(state, true)}
                 className="text-ink-1 hover:text-ink-0 text-xs"
               >
                 Retry
@@ -274,7 +281,7 @@ export function HarbourBoard({ onClose }: { onClose: () => void }) {
               </select>
               <button
                 type="button"
-                onClick={() => void load(state)}
+                onClick={() => void load(state, true)}
                 disabled={busy}
                 className="border-hairline-strong text-ink-0 hover:bg-abyss-2 flex h-8 items-center gap-1.5 rounded border px-3 text-xs font-medium transition-colors disabled:opacity-40"
               >
